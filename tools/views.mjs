@@ -16,6 +16,7 @@ export const VIEWS = {
   a_east: { pos: [-99 + 0.9 * 150, 40, 19.5 - 0.44 * 150], target: [-99, 40, 19.5] },
   // render 3: the shop front of block Б from the pavement, block A's podium in the distance
   render3: { pos: [-5, 2.2, 70], target: [-45, 9, 48], noCity: true },
+  poster: { pos: [-22, 4, 62], target: [-30, 4, 46], noCity: true },
   win_close: { pos: [-20, 30, 55], target: [-28, 30, 30] },
   street: { pos: [10, 9, 120], target: [5, 38, 20] },
   // like render 2: from the south-west, the glass tower in front

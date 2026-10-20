@@ -40,7 +40,8 @@ def poster(mb, a, b, z0, z1, nx, ny, off=0.06):
     """A lit poster panel (light box) between plan points a and b, facing out (n), UVs 0..1."""
     p0 = (a[0] + nx * off, a[1] + ny * off)
     p1 = (b[0] + nx * off, b[1] + ny * off)
-    mb.face([(*p0, z0), (*p1, z0), (*p1, z1), (*p0, z1)], 'Poster', [(1, 0), (0, 0), (0, 1), (1, 1)])  # seen from outside, u runs from p1 to p0
+    # p0 -> p1 runs left to right seen from outside; v is flipped for the canvas texture (flipY) of the viewer
+    mb.face([(*p0, z0), (*p1, z0), (*p1, z1), (*p0, z1)], 'Poster', [(0, 1), (1, 1), (1, 0), (0, 0)])
     # white frame round it
     for q0, q1, za, zb in ((p0, p1, z0 - 0.12, z0), (p0, p1, z1, z1 + 0.12)):
         mb.face([(*q0, za), (*q1, za), (*q1, zb), (*q0, zb)], 'Stone white')
