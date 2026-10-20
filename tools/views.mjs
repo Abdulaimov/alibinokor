@@ -3,6 +3,26 @@
 export const HOME = { pos: [-150, 165, 285], target: [5, 22, -5] };
 
 export const VIEWS = {
+  // the client renders' cameras (tools/ab/calib.py, points in tools/ab/calib_points.json), one per
+  // building where the render's composition does not follow the genplan exactly
+  r1_B: { cam: { pos: [-76.64, 3.0, 449.93], yaw: 7.007, f: 2714.6, v0: 843.9, size: [1600, 900] }, noCity: true },
+  r1_A: { cam: { pos: [-81.08, 15.5, 419.92], yaw: 9.918, f: 2500.4, v0: 751.2, size: [1600, 900] }, noCity: true },
+  r2_A: { cam: { pos: [-314.99, 2.74, -158.2], yaw: 118.053, f: 1998.7, v0: 851.9, size: [1600, 900] }, noCity: true },
+  r4_A: { cam: { pos: [-149.57, 61.07, 143.68], yaw: 23.436, f: 2022.0, v0: 1128.0, size: [1131, 1600] }, noCity: true },
+  r2_B: { cam: { pos: [-348.69, 0.5, -148.07], yaw: 115.613, f: 2055.9, v0: 868.5, size: [1600, 900] }, noCity: true, hideTower: 'A' },
+  r1_V: { cam: { pos: [-162.92, 3.0, 620.62], yaw: 12.237, f: 3854.0, v0: 839.5, size: [1600, 900] }, noCity: true },
+  // presentation views (natural perspective, fov 38): the overview like render 1, the opposite view
+  // like render 2, a pedestrian at the shops, the glass tower close up, a corner of a slab block,
+  // the courtyard
+  p1_overview: { cam: { pos: [-81.08, 15.5, 419.92], yaw: 9.918, f: 1300, v0: 610, size: [1600, 900] } },
+  p2_opposite: { cam: { pos: [-314.99, 2.74, -158.2], yaw: 118.053, f: 1250, v0: 640, size: [1600, 900] } },
+  p3_street: { pos: [-12, 1.7, 66], target: [-44, 9, 42] },
+  p4_tower: { cam: { pos: [-149.57, 61.07, 143.68], yaw: 23.436, f: 1600, v0: 980, size: [1600, 900] } },
+  p5_corner: { pos: [-110, 66, 120], target: [-62, 62, 52] },
+  p6_courtyard: { pos: [-20, 32, -120], target: [10, 4, -40] },
+  // straight down on the site (ground, roads, paving, lawns)
+  top_site: { pos: [-10, 520, 1], target: [-10, 0, 0], noCity: true },
+  top_south: { pos: [-40, 260, 60.5], target: [-40, 0, 60], noCity: true },
   // the start view, with the sales UI
   aerial: { ...HOME, ui: true },
   aerial_clean: { ...HOME },

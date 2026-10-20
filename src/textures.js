@@ -87,6 +87,117 @@ function noiseCanvas(size, base, spots) {
   return { c, g };
 }
 
+// Facing brick (renders 1-3): stretcher bond, 30 courses and 10 bricks to a 2 m tile (65 mm bricks,
+// 10 mm joints), each brick one of a few shades; a matching normal map (bricks proud of the joints,
+// slightly rounded arrises) and a roughness map. kind 'tan' (the sandy multi-tone facing brick) or
+// 'dark' (the graphite brick of the base).
+const BRICK = {
+  tan: { mortar: [226, 216, 200], shades: [[240, 202, 148, 24], [232, 184, 124, 24], [218, 166, 118, 16], [200, 146, 100, 12], [168, 118, 84, 7], [246, 218, 172, 17]] },
+  dark: { mortar: [112, 112, 114], shades: [[77, 77, 80, 30], [90, 90, 93, 28], [67, 67, 70, 22], [104, 104, 108, 12], [58, 58, 61, 8]] },
+};
+const brickCache = new Map();
+export function brickTextures(kind) {
+  if (brickCache.has(kind)) return brickCache.get(kind);
+  const N = 1024, courses = 30, perRow = 10;
+  const ch = N / courses, bw = N / perRow, joint = 4.6;
+  const spec = BRICK[kind];
+  const rnd = seeded(kind === 'tan' ? 7 : 11);
+  const pick = () => {
+    const tot = spec.shades.reduce((a, s) => a + s[3], 0);
+    let r = rnd() * tot;
+    for (const s of spec.shades) if ((r -= s[3]) <= 0) return s;
+    return spec.shades[0];
+  };
+  const col = new Uint8ClampedArray(N * N * 4), hgt = new Float32Array(N * N), rough = new Uint8ClampedArray(N * N * 4);
+  // brick cells: per course, the offset of half a brick every other course
+  const shade = [];
+  for (let r = 0; r < courses; r++) {
+    shade.push([]);
+    for (let k = 0; k <= perRow; k++) {
+      const s = pick(), v = 0.92 + 0.16 * rnd();
+      shade[r].push([s[0] * v, s[1] * v, s[2] * v, rnd()]);
+    }
+  }
+  for (let y = 0; y < N; y++) {
+    const r = Math.floor(y / ch), fy = y - r * ch;
+    const off = (r % 2) * (bw / 2);
+    for (let x = 0; x < N; x++) {
+      const xx = (x + off) % N, k = Math.floor(xx / bw), fx = xx - k * bw;
+      const dj = Math.min(fx, bw - fx, fy, ch - fy); // distance to the nearest joint (px)
+      const i = y * N + x;
+      let c, h;
+      if (dj < joint / 2) {
+        c = spec.mortar;
+        h = 0;
+        rough[i * 4 + 1] = 245;
+      } else {
+        const sh = shade[r][k % perRow];
+        // speckle and a slight fade across the brick face
+        const n = (Math.sin(x * 12.9898 + y * 78.233) * 43758.5453) % 1;
+        const sp = 1 + 0.07 * (n - 0.5) * 2;
+        c = [sh[0] * sp, sh[1] * sp, sh[2] * sp];
+        h = Math.min(1, (dj - joint / 2) / 2.2);
+        rough[i * 4 + 1] = 205 + 30 * sh[3];
+      }
+      col[i * 4] = c[0]; col[i * 4 + 1] = c[1]; col[i * 4 + 2] = c[2]; col[i * 4 + 3] = 255;
+      hgt[i] = h;
+      rough[i * 4] = 255; rough[i * 4 + 2] = 0; rough[i * 4 + 3] = 255;
+    }
+  }
+  const nrm = new Uint8ClampedArray(N * N * 4);
+  const H = (x, y) => hgt[((y + N) % N) * N + ((x + N) % N)];
+  for (let y = 0; y < N; y++) {
+    for (let x = 0; x < N; x++) {
+      const dx = (H(x + 1, y) - H(x - 1, y)) * 1.6, dy = (H(x, y + 1) - H(x, y - 1)) * 1.6;
+      const l = Math.hypot(dx, dy, 1), i = (y * N + x) * 4;
+      nrm[i] = (-dx / l * 0.5 + 0.5) * 255;
+      nrm[i + 1] = (dy / l * 0.5 + 0.5) * 255;
+      nrm[i + 2] = (1 / l * 0.5 + 0.5) * 255;
+      nrm[i + 3] = 255;
+    }
+  }
+  const tex = (data, srgb) => {
+    const c = document.createElement('canvas');
+    c.width = c.height = N;
+    c.getContext('2d').putImageData(new ImageData(data, N, N), 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.wrapS = t.wrapT = THREE.RepeatWrapping;
+    t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+    t.anisotropy = 8;
+    return t;
+  };
+  const out = { map: tex(col, true), normal: tex(nrm, false), rough: tex(rough, false) };
+  brickCache.set(kind, out);
+  return out;
+}
+
+// Cut-out patterns (alpha maps: white solid, black open), tiling.
+export function alphaTexture(kind) {
+  const size = 256, c = document.createElement('canvas');
+  c.width = c.height = size;
+  const g = c.getContext('2d');
+  g.fillStyle = '#ffffff';
+  g.fillRect(0, 0, size, size);
+  if (kind === 'perforated') {
+    // perforated sheet (render 4): staggered round holes, about a quarter open (the screen reads as a
+    // light grey sheet with the sky showing through it)
+    g.fillStyle = '#000000';
+    const p = 16;
+    for (let y = 0; y < size; y += p) {
+      for (let x = ((y / p) % 2) * (p / 2); x < size + p; x += p) {
+        g.beginPath();
+        g.arc(x, y + p / 2, p * 0.24, 0, Math.PI * 2);
+        g.fill();
+      }
+    }
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.colorSpace = THREE.NoColorSpace;
+  tex.anisotropy = 8;
+  return tex;
+}
+
 export function groundTexture(kind) {
   let canvas, metres;
   if (kind === 'grass') {
@@ -149,14 +260,21 @@ function blocks(size, base, joint, rows, cols, stagger, shades, seed) {
 const SURFACES = {
   // the perforated screens in front of the small loggias (renders): dark grey metal with a lighter
   // lattice ornament; 256 px = 1.2 m
+  // the perforated metal screens (renders 1 and 3): charcoal sheet with a lattice of openings, the
+  // light of the loggia behind showing through them (mid grey from a distance)
   screen() {
     const size = 256, c = document.createElement('canvas');
     c.width = c.height = size;
     const g = c.getContext('2d');
-    g.fillStyle = '#4a4b4e';
+    g.fillStyle = '#5a5857';
     g.fillRect(0, 0, size, size);
-    g.strokeStyle = '#8c8e92';
-    g.lineWidth = 5;
+    const rnd = seeded(5);
+    for (let k = 0; k < 900; k++) {
+      g.fillStyle = rnd() < 0.5 ? 'rgba(176,172,168,0.55)' : 'rgba(42,40,40,0.45)';
+      g.fillRect(rnd() * size, rnd() * size, 3, 3);
+    }
+    g.strokeStyle = '#a9a5a1';
+    g.lineWidth = 6;
     const q = size / 4;
     for (let i = 0; i < 4; i++) {
       for (let j = 0; j < 4; j++) {

@@ -17,8 +17,8 @@ AB_SPECS = {
     # shops behind the glass
     'Shop glass': ('#9fb4bb', 0.03, 0.0, {'alpha': 0.25}),
     'Shop floor': ('#d9d3c8', 0.4, 0.0, {}),
-    'Shop ceiling': ('#f6efe4', 0.8, 0.0, {'emission': ('#ffe9c8', 0.5)}),
-    'Shop wall': ('#efece6', 0.8, 0.0, {}),
+    'Shop ceiling': ('#f6efe4', 0.8, 0.0, {'emission': ('#ffd49a', 2.2)}),
+    'Shop wall': ('#efe2cc', 0.8, 0.0, {'emission': ('#ffe2b8', 0.35)}),
     'Shop light': ('#ffffff', 0.5, 0.0, {'emission': ('#fff7e8', 6.0)}),
     'Shelf': ('#e9e4da', 0.6, 0.0, {}),
     'Counter': ('#7a5a42', 0.5, 0.0, {}),
@@ -57,6 +57,19 @@ AB_SPECS = {
     'Screen dark': ('#3a3c40', 0.6, 0.4, {}),
     'Poster': ('#ffffff', 0.5, 0.0, {}),
     'Stair glass': ('#3d6f86', 0.05, 0.0, {}),
+    # block A's corner loggias (render 4): dark grey render inside, a light grey slab edge
+    'Loggia wall': ('#4a4d52', 0.8, 0.0, {}),
+    'Strip dark': ('#3b3632', 0.5, 0.3, {}),
+    # the slab blocks (renders 1-3): golden stone cornices and frames, three glasses
+    'Stone gold': ('#c9995c', 0.6, 0.0, {}),
+    'Stone pale': ('#b9bcbf', 0.6, 0.0, {}),
+    'Mulch': ('#4a3426', 1.0, 0.0, {}),
+    'Frame crown': ('#7a7f84', 0.45, 0.5, {}),
+    'Glass light': ('#8a9aa0', 0.05, 0.0, {}),
+    'Glass dark': ('#22383a', 0.05, 0.0, {}),
+    'Bay glass': ('#2f7d97', 0.05, 0.0, {}),
+    'Loggia soffit': ('#5a5d61', 0.85, 0.0, {}),
+    'Loggia slab': ('#c9cbcc', 0.7, 0.0, {}),
 }
 
 

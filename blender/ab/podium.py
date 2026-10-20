@@ -14,11 +14,13 @@ from shapely.ops import unary_union
 
 from complex.geom import MeshBuilder, make_object, resample, ring_coords
 
-from .config import GROUND, SECOND
+from . import config
 
 PEOPLE = []     # [x, y, z, kind] site metres, filled by build_base
 TREES = []      # trees on the podium roof: [x, y, z, h, r, kind]
-TOP = GROUND + SECOND   # 8.7: roof of the podium / level of floor 3
+# floor heights of the block being built (build_base sets them: the tower's podium is taller)
+GROUND, SECOND = config.GROUND, config.SECOND
+TOP = GROUND + SECOND   # roof of the podium / level of floor 3
 BAY = 3.3
 
 
@@ -47,12 +49,21 @@ def poster(mb, a, b, z0, z1, nx, ny, off=0.06):
         mb.face([(*q0, za), (*q1, za), (*q1, zb), (*q0, zb)], 'Stone white')
 
 
-def shop_front(mb, outline, rnd):
-    """Brick blocks (renders 1 and 3): bays of about 3.3 m; dark grey stone piers; in each bay a
-    window two storeys high in a white stone portal, a thin transom at the second floor; a dark
-    stone frieze over the portals with a white line; every fifth bay a dark wall with a poster."""
+# the posters (lit boxes standing out of the shop front and up past the podium roof): plan x on the
+# street face per block (render 1: Б one in the middle, В two; render 2: Г, Д one each)
+POSTERS = {'B': [-2.5], 'V': [23.5, -8.5], 'G': [-2.5], 'D': [-2.5]}
+PORTAL = 3.3     # a shop portal: 2.6 m of glass between two white jambs of 0.35 m
+PIER = 1.2       # dark stone pier between the portals (bay pitch 4.5 m, renders 1 and 3)
+
+
+def shop_front(mb, outline, rnd, key=None):
+    """Brick blocks (renders 1 and 3): dark graphite stone piers; in each bay a window two storeys
+    high in a white stone portal stepped in near its top (the jambs' outer half stops 1.5 m short),
+    a thin dark transom at the second floor; a dark stone frieze over the portals with a white
+    line; a few posters (lit boxes) on the street face standing out and up past the podium roof."""
     pts = ring_coords(outline)
-    k_all = 0
+    glass_top = TOP - 2.1
+    posters = POSTERS.get(key, [])
     for a, b in zip(pts, pts[1:] + pts[:1]):
         L = math.dist(a, b)
         if L < 0.3:
@@ -60,85 +71,100 @@ def shop_front(mb, outline, rnd):
         ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
         nx, ny = uy, -ux
         rot = math.atan2(uy, ux)
-        nb = max(1, round(L / BAY))
-        w = L / nb
+        P = lambda s, off=0.0: (a[0] + ux * s + nx * off, a[1] + uy * s + ny * off)
+
+        def bx(s0, s1, o0, o1, z0, z1, mat, top=True):
+            if s1 - s0 < 0.01:
+                return
+            c = P((s0 + s1) / 2, (o0 + o1) / 2)
+            mb.box(c[0], c[1], z0, s1 - s0, o1 - o0, z1 - z0, mat, rot=rot, top=top)
+        street = ny > 0.5 and L > 6      # the faces towards the street (+y)
+        pitch = PORTAL + PIER
+        # portals only where they fit with a pier's width of dark stone at both ends of the face
+        # (short faces at the bends of the outline stay dark stone)
+        nb = int((L - PIER) // pitch) if L >= PORTAL + 2 * PIER else 0
+        margin = (L - (nb * pitch - PIER)) / 2
+        # the dark stone face over the whole length: piers, frieze, the ends
+        mb.quad_wall(a, b, glass_top, TOP, 'Stone dark')
+        at = 0.0
         for k in range(nb):
-            k_all += 1
-            s0, s1 = k * w, (k + 1) * w
-            p0 = (a[0] + ux * s0, a[1] + uy * s0)
-            p1 = (a[0] + ux * s1, a[1] + uy * s1)
-            m = ((p0[0] + p1[0]) / 2, (p0[1] + p1[1]) / 2)
-            pier = 0.6
-            mb.box(p0[0] + ux * pier / 2, p0[1] + uy * pier / 2, 0.0, pier, 0.45, TOP, 'Stone dark', rot=rot)
-            g0 = (p0[0] + ux * pier, p0[1] + uy * pier)
-            gl = math.dist(g0, p1)
-            if gl < 0.6:
+            s0 = margin + k * pitch
+            s1 = s0 + PORTAL
+            mb.quad_wall(P(at), P(s0), 0.0, glass_top, 'Stone dark')
+            at = s1
+            # a poster in this bay?
+            sm = (s0 + s1) / 2
+            px = a[0] + ux * sm   # plan x of the bay (the street face runs along x)
+            if street and any(abs(px - q) < pitch / 2 for q in posters):
+                mb.quad_wall(P(s0), P(s1), 0.0, glass_top, 'Stone dark')
+                bx(s0 - 0.15, s1 + 0.15, 0.0, 0.45, 2.4, TOP + 1.6, 'Shop frame')
+                poster(mb, P(s0 + 0.1, 0.48), P(s1 - 0.1, 0.48), 2.7, TOP + 1.3, 0, 0, off=0.0)
                 continue
-            gm = ((g0[0] + p1[0]) / 2, (g0[1] + p1[1]) / 2)
-            top = TOP - 1.25
-            # frieze over the bay: dark stone with a white line
-            mb.box(gm[0], gm[1], top, gl, 0.4, TOP - top, 'Stone dark', rot=rot)
-            mb.box(gm[0] + nx * 0.2, gm[1] + ny * 0.2, TOP - 0.55, gl, 0.06, 0.08, 'Stone white', rot=rot)
-            if gl > 2.0 and k_all % 5 == 3 and L > 12:
-                # a dark wall with a poster on it
-                i0 = (g0[0] + nx * 0.18, g0[1] + ny * 0.18)
-                i1 = (p1[0] + nx * 0.18, p1[1] + ny * 0.18)
-                mb.quad_wall(i0, i1, 0.0, top, 'Stone dark')
-                e = 0.35
-                poster(mb, (i0[0] + ux * e, i0[1] + uy * e), (i1[0] - ux * e, i1[1] - uy * e), 2.6, top - 0.5, nx, ny)
-                continue
-            # white portal round the window
-            fr = 0.24
-            for c0 in (g0, (p1[0] - ux * fr, p1[1] - uy * fr)):
-                mb.box(c0[0] + ux * fr / 2 + nx * 0.06, c0[1] + uy * fr / 2 + ny * 0.06, 0.0, fr, 0.34, top, 'Stone white', rot=rot)
-            mb.box(gm[0] + nx * 0.06, gm[1] + ny * 0.06, top - 0.24, gl, 0.34, 0.24, 'Stone white', rot=rot)
-            # the window: clear glass set back, a thin transom at the second floor, a mullion
-            i0 = (g0[0] + ux * fr - nx * 0.1, g0[1] + uy * fr - ny * 0.1)
-            i1 = (p1[0] - ux * fr - nx * 0.1, p1[1] - uy * fr - ny * 0.1)
-            mid = ((i0[0] + i1[0]) / 2, (i0[1] + i1[1]) / 2)
-            gw = gl - 2 * fr
-            mb.quad_wall(i0, i1, 0.0, top - 0.24, 'Shop glass')
-            mb.box(mid[0], mid[1], 0.0, gw, 0.08, 0.08, 'Shop frame', rot=rot)
-            mb.box(mid[0], mid[1], GROUND - 0.1, gw, 0.1, 0.12, 'Shop frame', rot=rot)
-            mb.box(mid[0], mid[1], top - 0.32, gw, 0.08, 0.08, 'Shop frame', rot=rot)
-            if k % 3 == 0:
-                # glass doors
-                for e in (-0.9, 0.9):
-                    mb.box(mid[0] + ux * e, mid[1] + uy * e, 0.0, 0.06, 0.1, 2.5, 'Shop frame', rot=rot)
-                mb.box(mid[0], mid[1], 2.5, 1.86, 0.1, 0.07, 'Shop frame', rot=rot)
-            else:
-                mb.box(mid[0], mid[1], 0.0, 0.05, 0.08, top - 0.24, 'Shop frame', rot=rot)
+            # white portal: jambs (outer half stops 1.5 m short of the top: the step), head
+            fr = 0.35
+            for js in (s0, s1 - fr):
+                bx(js, js + fr, -0.02, 0.22, 0.0, glass_top + 0.3, 'Stone white')
+                bx(js + (0 if js == s0 else fr / 2), js + (fr / 2 if js == s0 else fr), 0.22, 0.42, 0.0, glass_top - 1.5, 'Stone white')
+            bx(s0, s1, -0.02, 0.22, glass_top, glass_top + 0.3, 'Stone white')
+            # the window: glass set back, a dark transom at the second floor, two mullions, doors
+            g0, g1 = s0 + fr, s1 - fr
+            gw = g1 - g0
+            mb.quad_wall(P(g0, -0.12), P(g1, -0.12), 0.0, glass_top, 'Shop glass')
+            for z0, z1 in ((0.0, 0.1), (GROUND - 0.2, GROUND + 0.1), (glass_top - 0.12, glass_top)):
+                bx(g0, g1, -0.14, -0.04, z0, z1, 'Shop frame')
+            for e in (g0 + 0.03, g0 + gw / 3, g0 + 2 * gw / 3, g1 - 0.03):
+                bx(e - 0.03, e + 0.03, -0.14, -0.04, 0.0, glass_top, 'Shop frame')
+            # reveals
+            for e, sg in ((g0, 1), (g1, -1)):
+                mb.quad_wall(P(e), P(e, -0.12), 0.0, glass_top, 'Stone white') if sg > 0 else mb.quad_wall(P(e, -0.12), P(e), 0.0, glass_top, 'Stone white')
+        mb.quad_wall(P(at), P(L), 0.0, glass_top, 'Stone dark')
+        # the frieze: a slim white line, a dark stone cornice at the podium roof
+        bx(0.0, L, -0.02, 0.12, TOP - 1.0, TOP - 0.92, 'Stone white')
+        bx(0.0, L, -0.05, 0.3, TOP - 0.25, TOP + 0.05, 'Stone dark')
 
 
 def glass_front(mb, outline, rnd):
-    """Block A's podium (render 3): continuous glazing on both floors with slim mullions, dark grey
-    panels in some bays, and thick white bands at the second floor and the roof, rounded at the
-    corners and standing out over the pavement."""
-    ring = ring_coords(outline)
-    pts = resample(ring, 1.6)
+    """Block A's podium (render 3): two storeys of shop glazing in bays, thin dark mullions and a
+    transom; between the bays dark grey stone piers and, every few bays, a wider pale grey stone
+    panel; a thick white band at the second floor and a thicker one at the roof, both rounded at
+    the corners and standing out over the pavement; a dark strip under each band; a glass
+    balustrade on the roof terrace."""
+    soft = outline.buffer(-1.5, join_style='round').buffer(1.5, join_style='round')
+    ring = ring_coords(soft.buffer(-0.25, join_style='round'))
+    pts = resample(ring, 1.5)
     n = len(pts)
+    g_lo, g_hi = 0.0, GROUND - 0.55        # first floor glass
+    s_lo, s_hi = GROUND + 0.6, TOP - 1.05  # second floor glass
+    u = 0.0
     for i in range(n):
         a, b = pts[i], pts[(i + 1) % n]
         L = math.dist(a, b)
         if L < 0.05:
             continue
         ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
-        nx, ny = uy, -ux
         rot = math.atan2(uy, ux)
-        i0 = (a[0] - nx * 0.25, a[1] - ny * 0.25)
-        i1 = (b[0] - nx * 0.25, b[1] - ny * 0.25)
-        dark = i % 9 in (4, 5)
-        for z0, z1 in ((0.0, GROUND - 0.35), (GROUND + 0.45, TOP - 0.9)):
-            mb.quad_wall(i0, i1, z0, z1, 'Stone dark' if dark else 'Shop glass')
-            if not dark:
-                mb.box(i0[0], i0[1], z0, 0.05, 0.1, z1 - z0, 'Shop frame', rot=rot)
-        if not dark:
-            m = ((i0[0] + i1[0]) / 2, (i0[1] + i1[1]) / 2)
-            mb.box(m[0], m[1], 2.7, L, 0.08, 0.06, 'Shop frame', rot=rot)
-    soft = outline.buffer(-1.5, join_style='round').buffer(1.5, join_style='round')
-    for z0, z1, out in ((GROUND - 0.35, GROUND + 0.45, 0.7), (TOP - 0.9, TOP + 0.25, 1.0)):
-        bandp = soft.buffer(out, join_style='round').difference(outline.buffer(-0.3, join_style='mitre'))
-        mb.prism(bandp, z0, z1, 'White band', 'White band', 'White band')
+        k = int(u // 1.5)
+        u += L
+        pale = k % 11 in (5, 6)         # a pale grey stone panel (render 3: between the shop groups)
+        pier = k % 11 == 0 or k % 11 == 4
+        for z0, z1 in ((g_lo, g_hi), (s_lo, s_hi)):
+            if pale:
+                mb.quad_wall(a, b, z0, z1, 'Stone pale')
+            elif pier:
+                mb.quad_wall(a, b, z0, z1, 'Stone dark')
+            else:
+                mb.quad_wall(a, b, z0, z1, 'Shop glass')
+                mb.box(a[0], a[1], z0, 0.06, 0.12, z1 - z0, 'Shop frame', rot=rot)
+                m = ((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
+                mb.box(m[0], m[1], z1 - 0.7, L + 0.02, 0.1, 0.06, 'Shop frame', rot=rot)
+                mb.box(m[0], m[1], z0, L + 0.02, 0.12, 0.1, 'Shop frame', rot=rot)
+        # the dark strips under the bands (the slab edges behind the bands)
+        mb.quad_wall(a, b, g_hi, GROUND - 0.35, 'Stone dark')
+        mb.quad_wall(a, b, s_hi, TOP - 0.9, 'Stone dark')
+    # the white bands: rounded, standing out, with a chamfered edge that catches the light
+    for z0, z1, out in ((GROUND - 0.35, GROUND + 0.6, 0.9), (TOP - 0.9, TOP + 0.45, 1.3)):
+        bandp = soft.buffer(out, join_style='round').difference(soft.buffer(-0.3, join_style='round'))
+        mb.prism_chamfer(bandp, z0, z1, 'White band', 'White band', 'White band', c=0.06)
 
 
 SIGNS = ['Sign white', 'Sign warm', 'Sign blue', 'Sign green', 'Sign red']
@@ -247,6 +273,9 @@ def entrances(mb, b, plan, base):
 
 
 def build_base(key, b, plan, mats, col, put, podium_site=None):
+    global GROUND, SECOND, TOP
+    GROUND, SECOND, _ = config.dims(b)
+    TOP = GROUND + SECOND
     rnd = random.Random(hash(key) & 0xffff)
     enc = Polygon(plan['enclosure']).buffer(0)
     base = enc.buffer(-0.1, join_style='mitre')
@@ -259,7 +288,14 @@ def build_base(key, b, plan, mats, col, put, podium_site=None):
     from complex.geom import ccw
     outline = ccw(outline.simplify(0.15))
     mb = MeshBuilder()
-    (glass_front if b['style'] == 'glass' else shop_front)(mb, outline, rnd)
+    if b['style'] == 'glass':
+        glass_front(mb, outline, rnd)
+    else:
+        # the shop front runs straight past the small jogs of the facade line (window reveals)
+        # (and past the pixel steps of the genplan's podium edge: those deviate less than 1 m)
+        front = outline.buffer(0.6, join_style='mitre').buffer(-0.6, join_style='mitre').simplify(1.0)
+        front = ccw(front if front.geom_type == 'Polygon' else max(front.geoms, key=lambda g: g.area))
+        shop_front(mb, front, rnd, key)
     people = []
     interior(mb, outline, base, rnd, b, people)
     PEOPLE.extend(people)
@@ -270,7 +306,9 @@ def build_base(key, b, plan, mats, col, put, podium_site=None):
     edge = outline.exterior
     cs = list(edge.coords)
     if b['style'] == 'glass':
-        mb.ribbon(cs, TOP + 0.25, TOP + 1.25, 'Railing glass', closed=True, double=True)
+        rail = ring_coords(outline.buffer(-1.5, join_style='round').buffer(1.5, join_style='round').buffer(1.15, join_style='round'))
+        mb.ribbon(rail, TOP + 0.45, TOP + 1.5, 'Railing glass', closed=True, double=True)
+        mb.tube(rail, [TOP + 1.47] * len(rail), [TOP + 1.53] * len(rail), 0.05, 'Frame dark', closed=True)
     else:
         mb.tube(cs, [TOP] * len(cs), [TOP + 0.45] * len(cs), 0.3, 'Stone dark', closed=True)
         mb.ribbon(cs, TOP + 0.45, TOP + 1.15, 'Railing glass', closed=True, double=True)

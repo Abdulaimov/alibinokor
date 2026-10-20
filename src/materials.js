@@ -5,7 +5,7 @@
 // configured in place, and names missing from the table keep what the model says.
 import * as THREE from 'three';
 import { Q } from './quality.js';
-import { groundTexture } from './textures.js';
+import { alphaTexture, brickTextures, groundTexture } from './textures.js';
 
 const BASE = `${import.meta.env.BASE_URL}textures/`;
 const loader = new THREE.TextureLoader();
@@ -76,8 +76,8 @@ const FACADE = /* glsl */ `
       vec3 room = mix(vec3(0.05, 0.065, 0.08), vec3(0.2, 0.21, 0.22), h);
       room = mix(room, vec3(0.62, 0.56, 0.46), step(0.88, h) * 0.7);   // curtains, a lit room
       room = mix(room, vec3(0.78, 0.78, 0.76), step(0.8, h) * step(h, 0.88) * step(0.6, f.y) * 0.6); // blinds half down
-      diffuseColor.rgb = mix(diffuseColor.rgb, room, win * inner);
-      diffuseColor.rgb = mix(diffuseColor.rgb, vec3(0.86, 0.85, 0.82), win * (1.0 - inner));
+      diffuseColor.rgb = mix(diffuseColor.rgb, room, win * inner * 0.7);
+      diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.08, win * (1.0 - inner));
       facadeGlass = win * inner;
       // a band at each floor slab, a darker plinth
       diffuseColor.rgb *= 1.0 - 0.1 * step(f.y, 0.05) * upper;
@@ -255,7 +255,9 @@ const LIB = {
   // facades: smooth render on the towers, painted concrete slab edges, powder-coated frames
   Terracotta: { set: 'plaster', tile: 2.2, color: '#b67d68', roughness: 1, normal: 0.55, vary: 0.05, env: 0.6 },
   'Terracotta dark': { set: 'plaster', tile: 2.2, color: '#6f4132', roughness: 1, normal: 0.55, vary: 0.05, env: 0.6 },
-  'White band': { set: 'plaster', tile: 2.2, color: '#ffffff', roughness: 0.6, normal: 0.15, vary: 0.01, env: 1.1 },
+  // white stone and render: the plaster set's relief and roughness, no colour map (its grey would
+  // make the white stone grey; the renders' white is white)
+  'White band': { set: 'plaster', mapless: true, tile: 2.2, color: '#f1efea', roughness: 0.6, normal: 0.15, vary: 0.01, env: 1.0 },
   'Plant room': { set: 'plaster', tile: 2.2, color: '#e4e1db', roughness: 0.9, normal: 0.4 },
   'Stone fin': { set: 'concrete', tile: 3, color: '#e3d6c2', roughness: 0.9, normal: 0.5 },
   Frame: { color: '#d7d1c6', roughness: 0.42, metalness: 0, env: 0.8 },
@@ -266,26 +268,45 @@ const LIB = {
   Roof: { set: 'concrete', tile: 3, color: '#a3a19c', roughness: 0.95, normal: 0.6, vary: 0.04 },
   'Solar panel': { color: '#1b2232', roughness: 0.18, metalness: 0.2, env: 1.1 },
   // glass: dark body seen through, reflections of the sky do the rest; slight tints only
-  'Window glass': { ...glass('#000000', 0.03, { env: 0.9, tint: '#c4d4dc', interior: [2.9, 3.3, 4.2, 8.7, 0.17, 0.26, 0.012, 0.1, 0.6] }), physical: { ior: 1.6 } },
-  'Tower glass': { ...glass('#000000', 0.02, { env: 1.9, tint: '#b8cad6', interior: [3.2, 3.3, 6.0, 8.7, 0.14, 0.2, 0.006, 0.4, 0.9], specular: '#d8e4ec' }), physical: { ior: 2.3 } },
+  'Window glass': { ...glass('#000000', 0.03, { env: 0.9, tint: '#c4d4dc', interior: [2.9, 3.5, 4.2, 12.0, 0.17, 0.26, 0.012, 0.1, 0.6] }), physical: { ior: 1.6 } },
+  // block A (renders 1, 2, 4): dark blue-green coated glass, the rooms behind it readable (curtains,
+  // furniture, a light here and there), the sky in it strongest towards the top and at grazing angles
+  'Tower glass': { ...glass('#000000', 0.02, { env: 1.5, tint: '#9db8c8', interior: [3.2, 3.75, 6.0, 12.0, 0.19, 0.36, 0.006, 0.28, 0.95], specular: '#d6e3ec' }), physical: { ior: 2.1 } },
+  'Strip dark': { color: '#3e3934', roughness: 0.55, metalness: 0.25, env: 0.6 },
+  // the slab blocks (renders 1-3): golden sandstone cornices and bay frames; the narrow tall
+  // glazing light grey, the dark strips dark green, the corner bays blue
+  'Stone pale': { set: 'plaster', mapless: true, tile: 2.2, color: '#b8bbbe', roughness: 0.7, normal: 0.25, env: 0.6 },
+  'Stone gold': { set: 'plaster', mapless: true, tile: 2.2, color: '#e8c08a', roughness: 0.7, normal: 0.35, vary: 0.03, env: 0.6 },
+  'Glass light': { ...glass('#000000', 0.03, { env: 1.4, tint: '#e6edf0', interior: [1.6, 3.5, 3.5, 12.0, 0.5, 0.75, 0.008, 0.45, 1.15] }), physical: { ior: 1.9 } },
+  'Glass dark': { ...glass('#000000', 0.03, { env: 1.0, tint: '#b3a69c', interior: [1.2, 3.5, 2.5, 12.0, 0.2, 0.3, 0.006, 0.32, 0.75] }), physical: { ior: 2.0 } },
+  'Bay glass': { ...glass('#000000', 0.03, { env: 1.35, tint: '#8fd2e6', interior: [2.0, 3.5, 3.5, 12.0, 0.42, 0.6, 0.008, 0.35, 1.1], specular: '#cfeaf2' }), physical: { ior: 2.1 } },
   // Ali Binokor facades (renders 1-4): tan facing brick, dark grey brick, white stone crown
-  'Brick tan': { set: 'brick', tile: 2.0, color: '#ebb27f', roughness: 0.95, normal: 0.9, vary: 0.05, env: 0.45 },
-  'Brick dark': { set: 'brick', tile: 2.0, color: '#5c5b5c', roughness: 0.92, normal: 0.9, vary: 0.04, env: 0.5 },
-  'Stone white': { set: 'plaster', tile: 2.2, color: '#ffffff', roughness: 0.75, normal: 0.22, vary: 0.015, env: 0.8 },
+  // facing brick drawn in the browser (textures.js brickTextures): sandy multi-tone and graphite
+  'Brick tan': { brick: 'tan', tile: 2.0, color: '#ffffff', roughness: 1, normal: 0.8, vary: 0.04, env: 0.45 },
+  'Brick dark': { brick: 'dark', tile: 2.0, color: '#ffffff', roughness: 1, normal: 0.8, vary: 0.03, env: 0.5 },
+  'Stone white': { set: 'plaster', mapless: true, tile: 2.2, color: '#efede7', roughness: 0.75, normal: 0.22, vary: 0.015, env: 0.8 },
   'Stone dark': { set: 'concrete', tile: 2.5, color: '#55565a', roughness: 0.72, normal: 0.35, vary: 0.02, env: 0.6 },
   'Frame dark': { color: '#2c3034', roughness: 0.38, metalness: 0.55, env: 0.9 },
+  'Frame crown': { color: '#80868b', roughness: 0.45, metalness: 0.5, env: 0.8 },
   'Stone beige': { set: 'plaster', tile: 2.2, color: '#e3c597', roughness: 0.75, normal: 0.3, vary: 0.02, env: 0.6 },
-  'Screen dark': { roughness: 0.5, metalness: 0.45, env: 1.0 },
+  'Screen dark': { roughness: 0.75, metalness: 0.1, env: 0.55 },
   Poster: { roughness: 0.4, env: 0.4 },
-  'Stair glass': glass('#000000', 0.03, { tint: '#a8d4e6', interior: [5.0, 3.3, 3.0, 8.7, 0.3, 0.25, 0.01, 0.4, 1.1] }),
+  'Stair glass': glass('#000000', 0.03, { tint: '#a8d4e6', interior: [5.0, 3.5, 3.0, 12.0, 0.3, 0.25, 0.01, 0.4, 1.1] }),
   'Frame light': { color: '#eceeee', roughness: 0.4, metalness: 0.2, env: 0.9 },
-  'Mesh screen': { color: '#dfe3e5', roughness: 0.5, metalness: 0.5, opacity: 0.82, transparent: true, env: 1.1 },
+  // block A's corner loggias (render 4): dark grey render, a light grey slab edge
+  'Loggia wall': { set: 'plaster', tile: 2.2, color: '#5b5e63', roughness: 0.85, normal: 0.25, env: 0.5 },
+  'Loggia soffit': { set: 'plaster', tile: 2.2, color: '#6a6d71', roughness: 0.9, normal: 0.2, env: 0.5 },
+  'Loggia slab': { set: 'plaster', tile: 2.2, color: '#d6d7d6', roughness: 0.7, normal: 0.2, env: 0.7 },
+  // block A's crown (render 4): perforated light grey sheet on the dark frame, the sky through it
+  'Mesh screen': { color: '#f0f1f1', roughness: 0.6, metalness: 0.15, opacity: 1, transparent: true, env: 0.5, alpha: 'perforated', alphaTile: 0.5 },
   'Shop floor': { set: 'concrete', tile: 1.4, color: '#e9e4da', roughness: 0.3, normal: 0.15, env: 1 },
-  'Shop ceiling': { color: '#f6f4f0', roughness: 0.9 },
-  'Shop wall': { color: '#f2efe9', roughness: 0.9 },
+  // the shops behind the glass read warm and lit (renders 1 and 3)
+  'Shop ceiling': { color: '#f3e7d4', roughness: 0.9 },
+  'Shop wall': { color: '#e7d8c2', roughness: 0.9 },
   Shelf: { color: '#ece7de', roughness: 0.6 },
   Counter: { color: '#7c5b42', roughness: 0.5 },
-  Ground: { set: 'grass', tile: 3.2, color: '#8f9a62', roughness: 1, normal: 0.6, vary: 0.18, detile: true, tint: '#b9b07a' },
+  // the ground beyond the plot: a mown green with a little variation (no large mottling)
+  Ground: { set: 'grass', tile: 3.2, color: '#86a05a', roughness: 1, normal: 0.6, vary: 0.07, detile: true, tint: '#a9b07a' },
   'Rubber orange': { set: 'rubber', tile: 2, color: '#e08a45', roughness: 1, normal: 0.6 },
   'Rubber yellow': { set: 'rubber', tile: 2, color: '#e6c452', roughness: 1, normal: 0.6 },
   'Sport green': { set: 'grass', tile: 1.0, color: '#4f9a3c', roughness: 0.95, normal: 0.5, vary: 0.04 },
@@ -295,7 +316,7 @@ const LIB = {
   'School wall': { set: 'plaster', tile: 2.5, color: '#ecdfcc', roughness: 0.9, normal: 0.3 },
   City: { set: 'plaster', tile: 3, color: '#ffffff', roughness: 0.92, normal: 0.25, vary: 0.05, env: 0.5, facade: [3.0, 3.4, 400] },
   'Curtain glass': glass('#33494a'),
-  'Shop glass': { color: '#d7e6ea', roughness: 0.03, opacity: 0.2, transparent: true, env: 1.3 },
+  'Shop glass': { color: '#e9e4d8', roughness: 0.03, opacity: 0.16, transparent: true, env: 0.55 },
   'Shop window': glass('#56605d', 0.05),
   'Gallery glass': glass('#7f8a88', 0.06),
   'Stained orange': glass('#8a4a22', 0.05),
@@ -313,8 +334,9 @@ const LIB = {
   // the plaza and the sidewalks: drawn pavers (textures.js), the photographed sets are dark and stained
   Paving: { color: '#ffffff', roughness: 0.95, vary: 0.05, env: 0.6 },
   Kerb: { set: 'concrete', tile: 2, color: '#d9d4ca', roughness: 0.95, normal: 0.6 },
-  Lawn: { set: 'grass', tile: 2.4, color: '#88a55a', roughness: 1, normal: 0.9, vary: 0.12, detile: true, tint: '#c4bb78' },
-  Grass: { set: 'grass', tile: 2.4, color: '#7f9a52', roughness: 1, normal: 0.9, vary: 0.14, detile: true, tint: '#c4bb78' },
+  Lawn: { set: 'grass', tile: 2.4, color: '#7fa556', roughness: 1, normal: 0.9, vary: 0.07, detile: true, tint: '#b6bb78' },
+  Grass: { set: 'grass', tile: 2.4, color: '#7f9a52', roughness: 1, normal: 0.9, vary: 0.08, detile: true, tint: '#b6bb78' },
+  Mulch: { set: 'grass', mapless: true, tile: 1.2, color: '#4b3527', roughness: 1, normal: 1.2, vary: 0.05 },
   Embankment: { set: 'concrete', tile: 4, color: '#c4b8a6', roughness: 1, normal: 0.7, vary: 0.08 },
   Bridge: { set: 'concrete', tile: 4, color: '#bdb9b1', roughness: 0.95, normal: 0.6, vary: 0.05 },
   Planter: { set: 'concrete', tile: 2, color: '#dcd7cd', roughness: 0.9, normal: 0.5 },
@@ -432,6 +454,13 @@ export function setupMaterial(m, renderer) {
     m.visible = false;
     return Promise.resolve();
   }
+  if (spec?.alpha) {
+    // a cut-out pattern (the perforated screen): the pattern's mips average to the open share far off
+    const a = alphaTexture(spec.alpha);
+    a.repeat.set(1 / spec.alphaTile, 1 / spec.alphaTile);
+    m.alphaMap = a;
+    m.needsUpdate = true;
+  }
   if (CANVAS[m.name]) {
     m.map = groundTexture(CANVAS[m.name]);
     m.color.set(0xffffff);
@@ -452,6 +481,7 @@ export function setupMaterial(m, renderer) {
   if (spec.roughness !== undefined) m.roughness = spec.roughness;
   if (spec.metalness !== undefined) m.metalness = spec.metalness;
   m.envMapIntensity = spec.env ?? 0.85;
+  if (spec.glass) m.userData.glass = true;   // world.js gives it the real sky to reflect
   // the model's glass carries KHR_materials_specular from Blender; plain F0 = 0.04 is right for glass
   if (m.specularIntensity !== undefined && spec.glass) m.specularIntensity = 1;
   if (spec.transparent) {
@@ -476,13 +506,29 @@ export function setupMaterial(m, renderer) {
     m.needsUpdate = true;
     return Promise.resolve();
   }
+  if (spec.brick) {
+    const t = brickTextures(spec.brick);
+    const rep = (x) => {
+      const c = x.clone();
+      c.repeat.set(1 / spec.tile, 1 / spec.tile);
+      c.needsUpdate = true;
+      return c;
+    };
+    m.map = rep(t.map);
+    m.normalMap = rep(t.normal);
+    m.normalScale.set(spec.normal ?? 1, spec.normal ?? 1);
+    m.roughnessMap = rep(t.rough);
+    m.aoMap = null;
+    m.needsUpdate = true;
+    return Promise.resolve();
+  }
   if (!spec.set) {
     m.needsUpdate = true;
     return Promise.resolve();
   }
   return Promise.all([map(spec.set, 'color', spec.tile), map(spec.set, 'normal', spec.tile), map(spec.set, 'orm', spec.tile)])
     .then(([color, normal, orm]) => {
-      m.map = color;
+      m.map = spec.mapless ? null : color;
       m.normalMap = normal;
       m.normalScale.set(spec.normal ?? 1, spec.normal ?? 1);
       m.roughnessMap = orm; // green channel

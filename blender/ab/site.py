@@ -36,6 +36,16 @@ def clean(g, r=0.35, tol=0.12):
     return g.simplify(tol, preserve_topology=True)
 
 
+def regular(g, r, tol):
+    """the genplan's areas read off pixels, made into clean surfaces: slivers narrower than 2r
+    taken out (opening), gaps narrower than 2r filled (closing), straight edges (simplified to tol)"""
+    if g.is_empty:
+        return g
+    g = g.buffer(-r, join_style='mitre').buffer(r, join_style='mitre')
+    g = g.buffer(r, join_style='mitre').buffer(-r, join_style='mitre')
+    return g.simplify(tol, preserve_topology=True).buffer(0)
+
+
 def parts(g):
     if g is None or g.is_empty:
         return []
@@ -70,6 +80,35 @@ def kerb_line(mb, g, z, w=0.12, h=0.06, mat='Kerb'):
 # ----------------------------------------------------------------------------
 # props
 # ----------------------------------------------------------------------------
+
+def cypress(mb, x, y, z, h, rnd):
+    """a slim columnar conifer (render 3: along the podium and the shop fronts)"""
+    r = h * rnd.uniform(0.11, 0.13)
+    mb.box(x, y, z, 0.12, 0.12, 0.5, 'Trunk')
+    mb.blob(x, y, z + 0.35 + h * 0.46, r, r, h * 0.47, 'Shrub', subdiv=2, jitter=0.05, rnd=rnd)
+    mb.blob(x, y, z + 0.35 + h * 0.83, r * 0.62, r * 0.62, h * 0.16, 'Shrub', subdiv=1, jitter=0.05, rnd=rnd)
+
+
+def topiary(mb, x, y, z, rnd):
+    """a cloud-pruned tree: three balls of foliage stacked on a clear stem, over a round bush"""
+    mb.box(x, y, z, 0.1, 0.1, 3.1, 'Trunk')
+    mb.blob(x, y, z + 0.55, 0.85, 0.85, 0.55, 'Shrub', subdiv=2, jitter=0.04, rnd=rnd)
+    for zz, r in ((1.55, 0.62), (2.3, 0.5), (2.95, 0.36)):
+        mb.blob(x, y, z + zz, r, r, r * 0.8, 'Shrub', subdiv=2, jitter=0.04, rnd=rnd)
+
+
+def mulch(mb, x, y, z, r, mat='Mulch'):
+    """a round bed of bark mulch at the foot of a tree, a stone edge round it"""
+    pts = [(x + r * math.cos(2 * math.pi * k / 18), y + r * math.sin(2 * math.pi * k / 18)) for k in range(18)]
+    mb.polygon_face(Polygon(pts), z + 0.015, mat)
+    mb.tube(pts, [z] * 18, [z + 0.05] * 18, 0.07, 'Kerb', closed=True)
+
+
+def grate(mb, x, y, z, rot):
+    """a cast-iron tree grate in the paving, 1.4 m square"""
+    mb.box(x, y, z + 0.004, 1.4, 1.4, 0.012, 'Lamp dark', rot=rot)
+    mb.box(x, y, z + 0.016, 0.6, 0.6, 0.006, 'Mulch', rot=rot)
+
 
 def lamp(mb, x, y, z, h=4.5, street=False, rot=0.0):
     mb.box(x, y, z, 0.14, 0.14, h, 'Lamp dark')
@@ -366,10 +405,11 @@ def build_site(mats, col, towers, pods):
         out = unary_union([g.difference(edge) for g in gs if keep(g)])
         out = unary_union([q for q in parts(out) if q.area > 80 and q.distance(asphalt) < 1.0])
         return unary_union([clean(ins, 0.35, 0.45), clean(out, 0.5, 0.8)])
-    lawn = trimmed(cls['lawn'])
-    paving = trimmed(cls['paving'] + cls['building'] + cls['podium'] + cls['kindergarten'])
-    play = unary_union([clean(g, 0.35, 0.35) for g in cls['play'] if g.intersects(inside)])
+    lawn = regular(trimmed(cls['lawn']), 0.7, 0.45)
+    paving = regular(trimmed(cls['paving'] + cls['building'] + cls['podium'] + cls['kindergarten']), 0.6, 0.45)
+    play = regular(unary_union([clean(g, 0.35, 0.35) for g in cls['play'] if g.intersects(inside)]), 0.5, 0.35)
     sport = unary_union([clean(g, 0.6) for g in cls['sport'] if g.intersects(inside)])
+    asphalt = regular(asphalt, 1.0, 0.5)
     blue = [g for g in cls['blue'] if g.area > 30]
     # one owner per spot: sport > play > lawn > paving > asphalt
     play = play.difference(sport)
@@ -382,7 +422,75 @@ def build_site(mats, col, towers, pods):
     if islands:
         paving = unary_union([paving] + [q.buffer(0.05) for q in islands])
         asphalt = asphalt.difference(unary_union(islands).buffer(0.05))
+    # south of the avenue (the genplan's neighbouring quarter: red earthwork hatching, symbols,
+    # lettering that read as odd paving shapes): a 4 m pavement along the avenue, lawn beyond it,
+    # the side roads kept; nothing else drawn there (a visual assumption, the genplan shows no
+    # landscaping outside the plot)
+    ys = lambda x: -81.1 - 0.103 * (x + 80.0)        # the avenue's south kerb (fitted on the genplan)
+    south = Polygon([(-200, ys(-200) - 0.3), (176, ys(176) - 0.3), (176, -111), (-200, -111)]).difference(plot.buffer(2))
+    walk_s = south.intersection(LineString([(-110, ys(-110)), (176, ys(176))]).buffer(4.3, cap_style='flat').buffer(0))
+    # the side roads (wide asphalt running off the avenue): straightened, the slivers between them gone
+    side = [regular(q, 2.0, 0.6) for q in parts(asphalt.intersection(south)) if q.area > 150 and q.buffer(-2.5).area > 20]
+    side = [q for q in side if not q.is_empty]
+    asphalt = unary_union([asphalt.difference(south)] + side)
+    lawn = unary_union([lawn.difference(south), south.difference(unary_union(side + [walk_s])).intersection(REGION)])
+    paving = unary_union([paving.difference(south), walk_s.difference(unary_union(side))])
+    play = play.difference(south)
+    blue = [g for g in blue if not g.intersects(south)]
+    # asphalt slivers left between the verges (thinner than 1.2 m): kerb-side paving
+    thin = asphalt.difference(regular(asphalt, 0.6, 0.3))
+    asphalt = regular(asphalt, 0.6, 0.3)
+    # the gaps the classes leave between them inside the region (narrower than 2 m): the paving
+    # next to them, not bare ground; and the thin asphalt slivers likewise
+    filled = unary_union([asphalt, lawn, paving, play, sport])
+    gaps = REGION.buffer(-0.6).difference(filled)
+    small = [q for q in parts(gaps) if q.area < 40 or q.buffer(-1.0).is_empty]
+    small += [q for q in parts(thin) if q.area > 0.05]
+    # a gap ringed by lawn is lawn (a symbol drawn on the grass), else the paving next to it
+    to_lawn, to_pav = [], []
+    for q in small:
+        rim = q.buffer(0.4).difference(q)
+        (to_lawn if rim.area > 0 and rim.intersection(lawn).area > 0.6 * rim.area else to_pav).append(q)
+    if to_lawn:
+        lawn = unary_union([lawn] + [q.buffer(0.03) for q in to_lawn])
+    if to_pav:
+        paving = unary_union([paving] + [q.buffer(0.03) for q in to_pav]).difference(unary_union([lawn, play, sport]))
+    asphalt = asphalt.difference(unary_union([paving, lawn]))
 
+    # small islands of asphalt on their own (symbols on the genplan's lawns and paving): what is
+    # round them
+    keep_a = []
+    for q in parts(asphalt):
+        if q.area >= 150:
+            keep_a.append(q)
+            continue
+        rim = q.buffer(0.5).difference(q)
+        on_road = rim.intersection(asphalt.difference(q.buffer(0.01))).area > 0.3 * rim.area
+        if on_road:
+            keep_a.append(q)
+        elif rim.intersection(paving).area > 0.5 * rim.area:
+            paving = unary_union([paving, q.buffer(0.03)])
+        else:
+            lawn = unary_union([lawn, q.buffer(0.03)])   # on the lawn or the open ground
+    asphalt = unary_union(keep_a)
+    # small lawn islands standing on their own in the open ground (no path or road at them): ground
+    lawn = unary_union([q for q in parts(lawn) if q.area >= 200 or q.buffer(0.6).intersects(unary_union([paving, asphalt, play, built]))])
+    # holes in the lawns (the genplan's symbols drawn on them: arrows, letters): lawn
+    def filled(g, amax):
+        out = []
+        for q in parts(g):
+            out.append(Polygon(q.exterior, [h for h in q.interiors if Polygon(h).area >= amax]))
+        return unary_union(out)
+    lawn = filled(lawn, 60.0).difference(unary_union([paving, play, sport, asphalt]).buffer(0.01))
+    # stray bits of paving on their own (corners of the genplan's lettering and symbols): lawn
+    keep_pav, stray = [], []
+    for q in parts(paving):
+        others = paving.difference(q.buffer(0.01))
+        touches = q.buffer(0.6).intersects(unary_union([asphalt, others, built]))
+        (keep_pav if q.area >= 60 or touches else stray).append(q)
+    if stray:
+        paving = unary_union(keep_pav)
+        lawn = unary_union([lawn] + [q.intersection(REGION) for q in stray])
     mb = MeshBuilder()
     # ground far and wide: dry grass and dust, the roads on it
     mb.polygon_face(box(-1500, -1500, 1500, 1500).difference(REGION.buffer(-0.5)), -0.06, 'Ground')
@@ -414,7 +522,7 @@ def build_site(mats, col, towers, pods):
     for g in hosp:
         hospital(mb, g, labels)
     for g in blue:
-        if g in hosp or not g.intersects(inside) or g.area > 400:
+        if g in hosp or not g.within(plot.buffer(1)) or g.area > 400:
             continue
         r = g.minimum_rotated_rectangle
         mb.polygon_face(r, 0.02, 'Asphalt')
@@ -548,6 +656,56 @@ def build_site(mats, col, towers, pods):
             h = {'conifer': (7, 11), 'poplar': (9, 14), 'small': (3.5, 5.5), 'broad': (6, 10)}[kind]
             trees.append([round(p.x, 2), round(p.y, 2), Z['lawn'], round(rnd.uniform(*h), 2), round(rnd.uniform(1.8, 3.4), 2), kind])
             placed += 1
+    # planting along the street fronts (render 3): columnar conifers and cloud-pruned trees in turn,
+    # 5-6 m out from the shop fronts, on the lawn verges or the paving (not on the roads, kept
+    # clear of the lamps, the trees and the entrances)
+    from .config import BLOCKS
+    from .towers import frame as block_frame
+    planted = []
+    soft_ground = unary_union([lawn, paving]).difference(built.buffer(3.0))
+
+    def free_spot(p, gap=3.2):
+        return (soft_ground.contains(p) and all(p.distance(Point(t[0], t[1])) > gap for t in trees)
+                and all(p.distance(Point(q)) > 2.0 for q in lamps) and all(p.distance(q) > gap for q in planted))
+    for key, side in (('B', 'y'), ('V', 'y'), ('G', 'y'), ('D', 'y'), ('A', '-y'), ('A', '-x')):
+        b = BLOCKS[key]
+        ang, to_site = block_frame(b)
+        ca, sa = math.cos(ang), math.sin(ang)
+        cx, cy = b['centre']
+        pod = pods.get(key)
+        fp = unary_union([Polygon([((ca * (x - cx) + sa * (y - cy)), (-sa * (x - cx) + ca * (y - cy))) for x, y in g.exterior.coords])
+                          for g in parts(unary_union([pod] if pod is not None else []))] + [Polygon([((ca * (x - cx) + sa * (y - cy)), (-sa * (x - cx) + ca * (y - cy))) for x, y in Polygon(next(t for t in towers if t['key'] == key)['outline']).exterior.coords])])
+        x0, y0, x1, y1 = fp.bounds
+        if side == 'y':
+            line = [(x, y1 + 5.5) for x in [x0 + 4 + 9.0 * k for k in range(int((x1 - x0 - 8) / 9.0) + 1)]]
+        elif side == '-y':
+            line = [(x, y0 - 5.0) for x in [x0 + 4 + 9.0 * k for k in range(int((x1 - x0 - 8) / 9.0) + 1)]]
+        else:
+            line = [(x0 - 5.0, y) for y in [y0 + 4 + 9.0 * k for k in range(int((y1 - y0 - 8) / 9.0) + 1)]]
+        for i, (px, py) in enumerate(line):
+            sx, sy = to_site(px, py)
+            p = Point(sx, sy)
+            if not free_spot(p):
+                continue
+            zg = Z['lawn'] if lawn.contains(p) else Z['paving']
+            if i % 2 == 0:
+                cypress(mb, sx, sy, zg, rnd.uniform(5.5, 7.0), rnd)
+            else:
+                topiary(mb, sx, sy, zg, rnd)
+            planted.append(p)
+            if zg == Z['lawn']:
+                mulch(mb, sx, sy, zg, 1.0)
+            else:
+                grate(mb, sx, sy, zg, ang)
+    # beds under the trees: mulch on the lawns, grates in the paving (inside the plot)
+    for t in trees:
+        p = Point(t[0], t[1])
+        if not inside.contains(p) or t[2] > 1.0:
+            continue
+        if lawn.buffer(-0.6).contains(p):
+            mulch(mb, t[0], t[1], Z['lawn'], min(1.3, 0.45 * t[4] + 0.35))
+        elif paving.buffer(-0.8).contains(p):
+            grate(mb, t[0], t[1], Z['paving'], 0.47)
     # people on the paths and plazas
     walk = paving.intersection(inside).difference(built.buffer(1.0))
     x0, y0, x1, y1 = walk.bounds

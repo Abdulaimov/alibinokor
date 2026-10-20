@@ -115,7 +115,10 @@ def pilasters(mb, enc, z0, z1):
 def look_of(block, f):
     """everything about floor f that changes its facade (floors alike share their meshes)"""
     if block['style'] == 'glass':
-        return ('glass', recess_group(f), f in STAGGER)
+        from . import tower_a
+        return tower_a.look_of(f)
+    from . import slab
+    return slab.look_of(block, f)
     secs = ('centre', 'stair', 'wing')
     return (tuple(wall_of(block, f, s) for s in secs), f in cornice_floors(block),
             tuple(f == white_from(block, s) for s in secs), tuple(f == dark_to(s) + 1 for s in secs))
@@ -429,8 +432,13 @@ def rails(mb, enc, air, z, white=True):
 
 def floor_meshes(block, plan, f, mats, name):
     """(slab mesh, walls mesh) of floor f, z = 0 at its floor level."""
-    h = height(f)
-    glass_tower = block['style'] == 'glass'
+    if block['style'] == 'glass':
+        from . import tower_a
+        return tower_a.floor_meshes(block, plan, f, mats, name, MeshBuilder)
+    from . import slab
+    return slab.floor_meshes(block, plan, f, mats, name, MeshBuilder)
+    h = height(f, block)
+    glass_tower = False
     enc = tower_outline(plan) if glass_tower else P(plan['enclosure'])
     mb = MeshBuilder()
     if glass_tower:
@@ -526,7 +534,7 @@ def build_block(key, mats, root_col, plans, podium=None):
     pick_col = get_collection(f'Picking {key}', col) if b['sales'] else None
     for f in range(FIRST_FLAT_FLOOR, b['floors'] + 1):
         pk = b['plans'][f]
-        z, h = level(f), height(f)
+        z, h = level(f, b), height(f, b)
         ck = (pk, look_of(b, f))
         if ck not in cache:
             cache[ck] = floor_meshes(b, plans[pk], f, mats, f'{key} {pk} {len(cache)}')
@@ -545,7 +553,7 @@ def build_block(key, mats, root_col, plans, podium=None):
         floors.append(dict(floor=f, z=round(z, 3), h=round(h, 3), plan=pk))
 
     top = plans[b['plans'][b['floors']]]
-    zr = level(b['floors'] + 1)
+    zr = level(b['floors'] + 1, b)
     mb = MeshBuilder()
     build_roof(mb, b, top, zr)
     ob = put(make_object(f'{key} roof', mb.to_mesh(f'{key} roof', mats), col))

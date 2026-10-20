@@ -66,6 +66,30 @@ for (const [name, v] of Object.entries(VIEWS)) {
       await new Promise((r) => setTimeout(r, 1500));
     }
     if (v.pos) app.setView(v.pos, v.target);
+    // a client render's camera (tools/ab/calib.py): level, with the shift of a 2-point perspective
+    // and the render's focal length, on a frame of the render's proportions
+    const cam = app.camera;
+    if (v.cam) {
+      const { pos, yaw, f, v0, size } = v.cam;
+      const k = innerWidth / size[0]; // the render's pixels in this frame
+      const a = (yaw * Math.PI) / 180;
+      app.controls.maxPolarAngle = Math.PI / 2 + 0.01; // level view (the site's own limit stops short of it)
+      app.setView(pos, [pos[0] + Math.sin(a) * 100, pos[1], pos[2] - Math.cos(a) * 100]);
+      const H = innerHeight, F = f * k, V0 = v0 * k;
+      const full = 2 * Math.max(V0, H - V0);
+      cam.fov = (2 * Math.atan(full / 2 / F) * 180) / Math.PI;
+      cam.aspect = innerWidth / full; // the full (shifted) frame's proportions: square pixels
+      cam.setViewOffset(innerWidth, full, 0, full / 2 - V0, innerWidth, H);
+      cam.updateProjectionMatrix();
+      app.controls.update?.();
+    } else if (cam.view?.enabled) {
+      cam.clearViewOffset();
+      cam.aspect = innerWidth / innerHeight;
+      cam.fov = 38;
+      cam.updateProjectionMatrix();
+    }
+    // a building that stands in front of the one compared (the renders are composed per building)
+    if (v.hideTower) app.building.showUpTo(v.hideTower, 0);
     // the city round the site off (it stands where the cameras of the marketing renders stood)
     for (const o of app.scene.children) if (o.name === 'city' || o.name?.startsWith('trees')) o.visible = !v.noCity || (o.name.startsWith('trees') && !v.noCity);
   }, v);

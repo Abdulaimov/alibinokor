@@ -10,9 +10,11 @@ from complex.geom import resample, ring_coords
 def build_roof(mb, b, plan, zr):
     enc = Polygon(plan['enclosure']).buffer(0)
     if b['style'] == 'glass':
-        glass_roof(mb, enc, zr)
+        from . import tower_a
+        tower_a.build_roof(mb, b, plan, zr)
     else:
-        brick_roof(mb, b, enc, plan, zr)
+        from . import slab
+        slab.build_roof(mb, b, plan, zr)
 
 
 def plant_rooms(mb, plan, zr, mat):
