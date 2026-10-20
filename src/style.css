@@ -98,7 +98,7 @@ button { font: inherit; color: inherit; cursor: pointer; }
 
 .apt-list { display: flex; flex-direction: column; gap: 8px; }
 .apt-row { display: grid; grid-template-columns: 1fr auto; gap: 2px 10px; text-align: left; border: 1px solid var(--line); background: #fff; border-radius: 12px; padding: 11px 12px; transition: transform 0.12s, box-shadow 0.12s; }
-.apt-row:hover, .apt-row.hover { transform: translateY(-1px); box-shadow: 0 6px 16px rgba(20, 30, 45, 0.1); border-color: rgba(154, 106, 60, 0.45); }
+.apt-row:hover, .apt-row.hover { transform: translateY(-1px); border-color: #ffa42b; background: #fff6ea; box-shadow: inset 4px 0 0 #ffa42b, 0 6px 16px rgba(255, 138, 0, 0.16); }
 .apt-row.muted { opacity: 0.45; }
 .apt-row .t { font-weight: 700; }
 .apt-row .d { font-size: 12px; color: var(--muted); }
@@ -138,7 +138,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .place-tag:hover { transform: translate(-50%, -100%) scale(1.05); }
 .place-tag.behind { opacity: 0.35; }
 .place-tag.behind:hover { opacity: 1; }
-.tag:hover, .tag.hover { transform: translate(-50%, -100%) scale(1.06); }
+.tag:hover, .tag.hover { transform: translate(-50%, -100%) scale(1.08); background: #ffa42b; border-left-color: #ff8a00; z-index: 2; }
+.tag:hover span, .tag.hover span { color: #3b2508; }
 .tag b { font-size: 13px; }
 .tag span { color: var(--muted); }
 

@@ -343,7 +343,8 @@ def build_site(mats, col, towers, pods):
     built = unary_union(footprints + [p for p in pods.values()])
 
     cls = {k: [g.intersection(REGION) for g in polys_of(raw, k)] for k in raw['classes']}
-    asphalt = unary_union([clean(g, 0.3, 0.1) for g in cls['asphalt']]).intersection(REGION)
+    # (the genplan is read off pixels: its edges zigzag; straightened to within ~0.4 m)
+    asphalt = unary_union([clean(g, 0.3, 0.4) for g in cls['asphalt']]).intersection(REGION)
     # outside the plot only the roads and the verges and pavements along them
     road_zone = asphalt.buffer(9)
 
@@ -364,10 +365,10 @@ def build_site(mats, col, towers, pods):
         ins = unary_union([g.intersection(edge) for g in gs if g.intersects(inside)])
         out = unary_union([g.difference(edge) for g in gs if keep(g)])
         out = unary_union([q for q in parts(out) if q.area > 80 and q.distance(asphalt) < 1.0])
-        return unary_union([clean(ins), clean(out)])
+        return unary_union([clean(ins, 0.35, 0.45), clean(out, 0.5, 0.8)])
     lawn = trimmed(cls['lawn'])
     paving = trimmed(cls['paving'] + cls['building'] + cls['podium'] + cls['kindergarten'])
-    play = unary_union([clean(g) for g in cls['play'] if g.intersects(inside)])
+    play = unary_union([clean(g, 0.35, 0.35) for g in cls['play'] if g.intersects(inside)])
     sport = unary_union([clean(g, 0.6) for g in cls['sport'] if g.intersects(inside)])
     blue = [g for g in cls['blue'] if g.area > 30]
     # one owner per spot: sport > play > lawn > paving > asphalt

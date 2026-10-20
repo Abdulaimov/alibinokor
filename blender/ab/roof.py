@@ -37,13 +37,15 @@ def brick_roof(mb, b, enc, plan, zr):
     mb.prism(ring, zr + 0.3, zr + 1.3, 'Stone white', 'Stone white')
     plant_rooms(mb, plan, zr + 0.3, 'Stone white')
     # the crown: white fins standing up from the parapet, a ring beam on top of them
-    pts = resample(ring_coords(enc.buffer(0.05, join_style='mitre')), 1.65)
+    pts = resample(ring_coords(enc.buffer(0.05, join_style='mitre')), 3.3)
     n = len(pts)
     for i, p in enumerate(pts):
         q = pts[(i + 1) % n]
         rot = math.atan2(q[1] - p[1], q[0] - p[0])
-        tall = 4.2 if i % 4 == 0 else 3.3
-        mb.box(p[0], p[1], zr + 1.3, 0.32, 0.7, tall, 'Stone white', rot=rot)
+        tall = 4.0 if i % 3 == 0 else 3.2
+        mb.box(p[0], p[1], zr + 1.3, 0.4, 0.8, tall, 'Stone white', rot=rot)
+    from .towers import pilasters
+    pilasters(mb, enc, zr - 0.2, zr + 4.75)   # the white pilasters run up through the crown
     beam = enc.buffer(0.3, join_style='mitre').difference(enc.buffer(-0.35, join_style='mitre'))
     mb.prism(beam, zr + 4.4, zr + 4.75, 'Stone white', 'Stone white', 'Stone white')
     # a few condensers on the roof

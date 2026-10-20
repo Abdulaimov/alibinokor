@@ -4,6 +4,9 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
+import { LineMaterial } from 'three/addons/lines/LineMaterial.js';
+import { LineSegments2 } from 'three/addons/lines/LineSegments2.js';
+import { LineSegmentsGeometry } from 'three/addons/lines/LineSegmentsGeometry.js';
 import { MODEL_URL, toScene } from './config.js';
 import { flagstone, materialFor, setupMaterial } from './materials.js';
 
@@ -15,6 +18,17 @@ async function loadModel(loader, url, onProgress) {
   const bytes = Uint8Array.from(atob(glb), (c) => c.charCodeAt(0));
   return loader.parseAsync(bytes.buffer, '');
 }
+
+// outlines of the apartments (lines a few pixels wide): a floor under the pointer, the flats of the
+// open floor, and the flat under the pointer / chosen, drawn bright over everything
+const line = (color, linewidth, opacity, depthTest = true) =>
+  new LineMaterial({ color, linewidth, transparent: true, opacity, depthTest, depthWrite: false });
+export const OUTLINE = {
+  floor: line(0xffffff, 3, 1),
+  open: line(0xf2c98f, 1.6, 0.9),
+  hover: line(0xffa42b, 4.5, 1, false),
+  chosen: line(0xff8a00, 4.5, 1, false),
+};
 
 export async function loadComplex(apartments, renderer, onProgress) {
   const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
@@ -68,16 +82,26 @@ export async function loadComplex(apartments, renderer, onProgress) {
     const apt = apartments.find((a) => a.id === id);
     if (!apt) continue;
     mesh.userData.apt = apt;
-    const edges = new THREE.LineSegments(
-      new THREE.EdgesGeometry(mesh.geometry, 35),
-      new THREE.LineBasicMaterial({ transparent: true, opacity: 0.95 }),
-    );
+    const eg = new THREE.EdgesGeometry(mesh.geometry, 35);
+    const edges = new LineSegments2(new LineSegmentsGeometry().fromEdgesGeometry(eg), OUTLINE.floor);
     edges.renderOrder = 11;
     edges.visible = false;
     mesh.add(edges);
+    // the flat's outline on its floor (for the plan of the open floor): the bottom edges, raised a little
+    const pos = eg.attributes.position.array;
+    let y0 = Infinity;
+    for (let i = 1; i < pos.length; i += 3) y0 = Math.min(y0, pos[i]);
+    const flat = [];
+    for (let i = 0; i < pos.length; i += 6) {
+      if (pos[i + 1] < y0 + 0.01 && pos[i + 4] < y0 + 0.01) flat.push(pos[i], y0 + 0.08, pos[i + 2], pos[i + 3], y0 + 0.08, pos[i + 5]);
+    }
+    const ring = new LineSegments2(new LineSegmentsGeometry().setPositions(flat), OUTLINE.open);
+    ring.renderOrder = 11;
+    ring.visible = false;
+    mesh.add(ring);
     box.setFromObject(mesh);
     const c = box.getCenter(new THREE.Vector3());
-    units.set(apt.id, { overlay: mesh, edges, center: new THREE.Vector3(c.x, apt.baseY, c.z), top: box.max.y });
+    units.set(apt.id, { overlay: mesh, edges, ring, center: new THREE.Vector3(c.x, apt.baseY, c.z), top: box.max.y });
   }
 
   // Floors that share a mesh (the typical floors: same plan, same height) are drawn as one instanced

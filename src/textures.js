@@ -153,10 +153,10 @@ const SURFACES = {
     const size = 256, c = document.createElement('canvas');
     c.width = c.height = size;
     const g = c.getContext('2d');
-    g.fillStyle = '#3d3d3e';
+    g.fillStyle = '#4a4b4e';
     g.fillRect(0, 0, size, size);
-    g.strokeStyle = '#626264';
-    g.lineWidth = 4;
+    g.strokeStyle = '#8c8e92';
+    g.lineWidth = 5;
     const q = size / 4;
     for (let i = 0; i < 4; i++) {
       for (let j = 0; j < 4; j++) {
@@ -169,9 +169,9 @@ const SURFACES = {
         g.stroke();
       }
     }
-    g.fillStyle = 'rgba(0,0,0,0.2)';
+    g.fillStyle = 'rgba(0,0,0,0.15)';
     for (let i = 0; i <= 4; i++) g.fillRect(i * q - 2, 0, 4, size);
-    return { canvas: c, metres: 1.6 };
+    return { canvas: c, metres: 1.1 };
   },
   // the posters on the shop fronts: one picture over the whole panel (UV 0..1)
   poster() {

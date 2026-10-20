@@ -22,7 +22,7 @@ hides the floors above an opened one; floors that look the same share their mesh
 import math
 
 import numpy as np
-from shapely.geometry import Point, Polygon, box
+from shapely.geometry import LineString, Point, Polygon, box
 from shapely.ops import unary_union
 
 from complex.geom import MeshBuilder, get_collection, make_object, resample, ring_coords
@@ -60,12 +60,15 @@ def section_box(sec):
 
 
 def white_from(block, sec):
+    """first floor of the white stone top (render 1: four floors on the wings and by the stairs,
+    five in the centre)"""
     N = block['floors']
-    return {'wing': N - 4, 'centre': N - 4, 'stair': N - 3}[sec]
+    return {'wing': N - 3, 'centre': N - 4, 'stair': N - 3}[sec]
 
 
 def dark_to(sec):
-    return {'wing': 5, 'centre': 5, 'stair': 2}[sec]
+    """last floor of the dark brick base above the shops (render 1: stepped)"""
+    return {'wing': 5, 'centre': 6, 'stair': 4}[sec]
 
 
 def wall_of(block, f, sec):
@@ -77,7 +80,36 @@ def wall_of(block, f, sec):
 
 
 def cornice_floors(block):
-    return (9, 15) if block['floors'] >= 22 else (8, 14)
+    """beige stone cornices: at the foot of floors 11 and 17 (render 1)"""
+    return (11, 17) if block['floors'] >= 22 else (10, 15)
+
+
+# white stone pilasters from the shops to the roof where the centre section meets the stair
+# sections, on both long faces (renders 1-3: "the white stripe")
+PILASTERS = (-9.72, 9.72)
+PIL_W, PIL_D = 0.7, 0.32
+
+
+def mid_stripe(p):
+    return False
+
+
+def pilaster_spots(enc):
+    """(x, y, outward sign) of every pilaster on the facade line of this plan"""
+    out = []
+    x0, y0, x1, y1 = enc.bounds
+    for x in PILASTERS:
+        line = LineString([(x, y0 - 1), (x, y1 + 1)]).intersection(enc)
+        if line.is_empty:
+            continue
+        ys = [c[1] for g in getattr(line, 'geoms', [line]) for c in g.coords]
+        out += [(x, max(ys), 1), (x, min(ys), -1)]
+    return out
+
+
+def pilasters(mb, enc, z0, z1):
+    for x, y, sg in pilaster_spots(enc):
+        mb.box(x, y + sg * (PIL_D / 2 - 0.04), z0, PIL_W, PIL_D, z1 - z0, 'Stone white', top=True, bottom=True)
 
 
 def look_of(block, f):
@@ -99,11 +131,30 @@ STAGGER = {3: (1.2, 2.6), 4: (3.4, 0.8), 5: (0.6, 3.8), 6: (2.4, 1.6), 7: (4.6, 
            10: (3.0, 2.0), 11: (0.9, 4.2), 12: (2.2, 1.1), 13: (0.0, 2.6)}
 
 
+_TYP = {}
+
+
+def typical_A():
+    if 'A' not in _TYP:
+        _TYP['A'] = load_plans()['A']
+    return _TYP['A']
+
+
 def tower_outline(plan):
     """The curtain wall of block A: a plain square just outside the plan's outer walls (the facade
     line of the drawing has small jogs that the glass runs straight past)."""
     x0, y0, x1, y1 = P(plan['enclosure']).buffer(-0.8, join_style='mitre').buffer(0.8, join_style='mitre').bounds
     return box(x0 - 0.12, y0 - 0.12, x1 + 0.12, y1 + 0.12)
+
+
+def glazed_column(plan, enc):
+    """the band-less glass column of block A: where the stairs and the corridors reach the facade"""
+    x0, y0, x1, y1 = enc.bounds
+    com = unary_union([P(c) for c in plan['common'] if P(c).distance(enc.exterior) < 0.8])
+    if com.is_empty:
+        return Polygon()
+    cy0, cy1 = com.bounds[1], com.bounds[3]
+    return box(x0 - 1.0, cy0 - 0.2, x0 + 0.8, cy1 + 0.2)
 
 
 def recess_group(f):
@@ -122,8 +173,8 @@ def recess_terraces(plan, group):
             c = P(r['poly']).centroid
             on_y = abs(c.y) > abs(c.x)
             along = c.x if on_y else c.y  # position along its face
-            banded = (on_y and c.y < 0) or (not on_y and c.x < 0)  # the south and the west face
-            if banded and -12.5 < along < -5.5:
+            # (render 4: one recessed bay per face, the bays of the two groups staggered)
+            if (group == 1 and -12.5 < along < -5.5) or (group == 2 and 5.5 < along < 12.5):
                 out.append(P(r['poly']))
     return out
 
@@ -140,13 +191,42 @@ def classify(enc, plan, f, block, step=0.3):
     common = U(plan['common'])
     wins = U(plan['windows'] + plan['glazing'], 0.0)
     solid = U(plan['walls'] + plan['struct'], 0.0)
+    if glass_tower:
+        # the dark mullion strips (where walls between flats meet the glass) follow the typical
+        # floor on every floor, so they run straight up the tower
+        typ = typical_A()
+        wins = U(typ['windows'] + typ['glazing'], 0.0)
+        solid = U(typ['walls'] + typ['struct'], 0.0)
     recess = unary_union(recess_terraces(plan, recess_group(f))) if glass_tower else Polygon()
-    # the stair halls' windows: a narrow glazed strip in the middle of each (renders 1-3)
-    stair_mid = unary_union([P(w).centroid.buffer(1.0) for w in plan['windows'] if P(w).distance(common) < 0.5])
+
     air = U([r['poly'] for r in rooms if r['kind'] == 'terrace']) if not glass_tower else recess
     pts = resample(ring_coords(enc), step)
     n = len(pts)
     cls = []
+    ring_ccw = enc.exterior.is_ccw
+
+    def behind(a, b, geom, depth=0.75):
+        """is geom straight behind this piece of the facade (within depth, not just near it)?"""
+        dx, dy = b[0] - a[0], b[1] - a[1]
+        L = math.hypot(dx, dy) or 1e-9
+        nx, ny = (dy / L, -dx / L) if ring_ccw else (-dy / L, dx / L)  # outward
+        mx, my = (a[0] + b[0]) / 2, (a[1] + b[1]) / 2
+        probe = LineString([(mx + nx * 0.05, my + ny * 0.05), (mx - nx * depth, my - ny * depth)])
+        return probe.intersects(geom)
+    # the stair halls' tall glazing: 3.2 m in the middle of each stair window, dark screens either
+    # side (render 1: dark - blue - dark)
+    stair_wins = unary_union([P(w).buffer(0.3) for w in plan['windows'] if P(w).distance(common) < 0.5])
+    glass_boxes = []
+    for w in getattr(stair_wins, 'geoms', [stair_wins]):
+        if w.is_empty:
+            continue
+        x0_, y0_, x1_, y1_ = w.bounds
+        cx_, cy_ = (x0_ + x1_) / 2, (y0_ + y1_) / 2
+        if x1_ - x0_ > y1_ - y0_:
+            glass_boxes.append(box(cx_ - 1.6, y0_ - 1, cx_ + 1.6, y1_ + 1))
+        else:
+            glass_boxes.append(box(x0_ - 1, cy_ - 1.6, x1_ + 1, cy_ + 1.6))
+    stair_glass = unary_union(glass_boxes) if glass_boxes else Polygon()
     for i in range(n):
         a, b = pts[i], pts[(i + 1) % n]
         m = Point((a[0] + b[0]) / 2, (a[1] + b[1]) / 2)
@@ -160,17 +240,18 @@ def classify(enc, plan, f, block, step=0.3):
             else:
                 c = 'glaze'
         else:
+            on_win = behind(a, b, wins)
             if small.distance(m) < 0.1:
                 c = 'screen'
-            elif wins.distance(m) < 0.3 and common.distance(m) < 0.5:
-                c = 'stair' if stair_mid.contains(m) else 'wall'
-            elif not air.is_empty and air.distance(m) < 0.3 and wins.distance(m) > 0.3 and solid.distance(m) > 0.12:
+            elif on_win and common.distance(m) < 0.5:
+                c = 'stair' if stair_glass.contains(m) else 'screen'
+            elif not air.is_empty and air.distance(m) < 0.3 and not on_win and solid.distance(m) > 0.12:
                 c = 'rail'
-            elif wins.distance(m) < 0.3:
+            elif on_win:
                 c = 'win'
             else:
                 c = 'wall'
-            if c in ('wall', 'win') and abs(m.x) < 1.0 and abs(m.y) > 8:
+            if c == 'wall' and abs(m.x) < 0.6 and abs(m.y) > 8:
                 c = 'pil'
         cls.append(c)
     if glass_tower:
@@ -210,14 +291,14 @@ def facade_floor(mb, enc, plan, f, block, h):
     out_v /= np.maximum(np.linalg.norm(out_v, axis=1), 1e-9)[:, None]
     inner = P_ - out_v * REVEAL
     T = lambda q: (float(q[0]), float(q[1]))
-    frame = 'Frame dark'
+    frame = 'Frame dark' if glass_tower else 'Frame light'
     run = 0.0
     for i in range(n):
         j = (i + 1) % n
         a, b, c, u, l = T(P_[i]), T(P_[j]), cls[i], float(us[i]), float(L[i])
         rot = math.atan2(t[i][1], t[i][0])
         mid = (P_[i] + P_[j]) / 2
-        wall = 'White band' if glass_tower else wall_of(block, f, section(mid[0]))
+        wall = 'White band' if glass_tower else 'Stone white' if mid_stripe(mid) else wall_of(block, f, section(mid[0]))
         if c == 'rail':
             run = 0.0
             continue
@@ -253,7 +334,7 @@ def facade_floor(mb, enc, plan, f, block, h):
             run = 0.0
             continue
         # punched windows ('win') and the stair hall's tall glazing ('stair')
-        lo, hi = (0.15, h - 0.12) if c == 'stair' else (SILL, h - HEAD)
+        lo, hi = (0.0, h) if c == 'stair' else (SILL, h - HEAD)
         glass = 'Stair glass' if c == 'stair' else 'Window glass'
         ret = 'Stone white' if c == 'stair' else wall
         ai, bi = T(inner[i]), T(inner[j])
@@ -290,7 +371,7 @@ def facade_floor(mb, enc, plan, f, block, h):
             if cls[k] == 'wall' and cls[k - 1] == 'win' and wall_of(block, f, section(mid[0])) == 'Stone white':
                 q = P_[k] + out_seg[k] * 0.16 + t[k] * 0.12
                 mb.box(q[0], q[1], 0.0, 0.24, 0.32, h, 'Stone white', rot=math.atan2(t[k][1], t[k][0]))
-            if cls[k] == 'pil' and cls[k - 1] != 'pil':
+            if False and cls[k] == 'pil' and cls[k - 1] != 'pil':
                 j = k
                 while cls[(j + 1) % n] == 'pil':
                     j += 1
@@ -360,12 +441,13 @@ def floor_meshes(block, plan, f, mats, name):
         ring = enc.buffer(0.34, join_style='mitre').difference(enc.buffer(-0.06, join_style='mitre'))
         # white bands on the west and the south face only; the north and east faces are all glass,
         # a slim dark line at each slab
-        banded = unary_union([box(x0 - 1, y0 - 1, x0 + 0.5, y1 + 1), box(x0 - 1, y0 - 1, x1 + 1, y0 + 0.5)])
-        cuts = unary_union([P(c).buffer(0.3) for c in plan['common']]).intersection(enc.exterior.buffer(0.6))
-        band = ring.intersection(banded).difference(cuts.buffer(0.05))
+        # white bands on all four faces (renders 1, 2, 4), broken by the glazed column at the stair
+        # and corridor end of the west face, which is glass from bottom to top
+        cuts = glazed_column(plan, enc)
+        band = ring.difference(cuts)
         mb.prism(band, -0.42, 0.45, 'White band', 'White band', 'White band')
-        line = enc.buffer(0.06, join_style='mitre').difference(enc.buffer(-0.06, join_style='mitre')).difference(banded)
-        mb.prism(line, -0.08, 0.06, 'Frame dark', 'Frame dark', 'Frame dark')
+        line = enc.buffer(0.06, join_style='mitre').difference(enc.buffer(-0.06, join_style='mitre')).intersection(cuts)
+        mb.prism(line, -0.06, 0.05, 'Frame dark', 'Frame dark', 'Frame dark')
         if f in STAGGER:
             ls, lw = STAGGER[f]
             if ls:
@@ -375,7 +457,9 @@ def floor_meshes(block, plan, f, mats, name):
     else:
         mb.prism(enc.buffer(-0.08, join_style='mitre'), -0.2, SLAB, 'Stone white', 'Shop floor', 'Stone white')
         ring = enc.buffer(0.16, join_style='mitre').difference(enc.buffer(-0.05, join_style='mitre'))
-        if f in cornice_floors(block):
+        for x, y, sg in pilaster_spots(enc):  # the white pilasters run through the bands
+            ring = ring.difference(box(x - PIL_W / 2, y - 0.6, x + PIL_W / 2, y + 0.6))
+        if f in cornice_floors(block) or f == dark_to('wing') + 1:
             tan = unary_union([section_box(s) for s in SECTIONS if wall_of(block, f, s) == 'Brick tan'])
             mb.prism(ring.buffer(0.08, join_style='mitre').intersection(tan), -0.25, 0.3, 'Stone beige', 'Stone beige', 'Stone beige')
             mb.prism(ring.buffer(0.14, join_style='mitre').intersection(tan), 0.3, 0.42, 'Stone beige', 'Stone beige', 'Stone beige')
@@ -383,18 +467,19 @@ def floor_meshes(block, plan, f, mats, name):
             if f == white_from(block, s):
                 mb.prism(ring.buffer(0.04).intersection(section_box(s)), -0.3, 0.3, 'Stone white', 'Stone white', 'Stone white')
             elif f == dark_to(s) + 1 and dark_to(s) > 2:
-                mb.prism(ring.intersection(section_box(s)), -0.25, 0.15, 'Stone dark', 'Stone dark', 'Stone dark')
+                mb.prism(ring.intersection(section_box(s)), -0.25, -0.05, 'Stone dark', 'Stone dark', 'Stone dark')
     slab_mesh = mb.to_mesh(f'{name} slab', mats)
     mb = MeshBuilder()
     pts, cls, extra = facade_floor(mb, enc, plan, f, block, h)
     if glass_tower:
-        inner_openings(mb, plan, h, recess_terraces(plan, recess_group(f)), 'Stone dark', 'Tower glass', True)
+        inner_openings(mb, plan, h, recess_terraces(plan, recess_group(f)), 'Frame dark', 'Window glass', True)
         rails(mb, enc, extra['recess'], SLAB, white=True)
     else:
         rooms = [r for a in plan['apartments'] for r in a['rooms'] + a['balconies']]
         terr = [P(r['poly']) for r in rooms if r['kind'] == 'terrace']
         inner_openings(mb, plan, h, terr, 'Stone white', 'Window glass', False)
         rails(mb, enc, extra['air'], SLAB)
+        pilasters(mb, enc, -0.2, h)
     return slab_mesh, mb.to_mesh(f'{name} walls', mats)
 
 

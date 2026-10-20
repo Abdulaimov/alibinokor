@@ -21,6 +21,8 @@
   `tools/ab/extract_plan.py`: стены, колонны, окна, комнаты, квартиры. Названия комнат распознаны
   по надписям на листах, площадь и число комнат каждой квартиры совпадают с подписями на листах.
   Этажи без отдельного листа повторяют ближайший типовой (так сказал заказчик).
+  Двери тоже с листов: одна дверь между двумя комнатами, открывается в ту сторону, куда она
+  нарисована. Маленькие технические лоджии (до 2,6 м²) — со стенами и одной дверью, как на листе.
 - **Генплан** (`build/site_raw.json`) — `tools/ab/site_map.py`: асфальт, газоны, мощение,
   площадки, деревья, номера зон.
 - **Фасады** — по рендерам застройщика (`blender/ab/towers.py`, `podium.py`, `roof.py`).
@@ -69,6 +71,10 @@ node tools/check_app.mjs               # все квартиры, этажи, к
 node tools/shots.mjs build/shots       # кадры с фиксированных камер (tools/views.mjs)
 tools/ab/py tools/ab/compare.py RENDER.jpg build/shots/render1.png build/cmp1.png   # рендер и модель рядом
 tools/ab/py tools/ab/overlay_plans.py  # распознанные планы поверх листов PDF
+tools/ab/py tools/ab/check_doors.py    # двери: в чужую квартиру, две в одну комнату, комната без входа
+node tools/ab/notes.mjs                # комнаты, где не встала мебель (пустой ответ — всё обставлено)
+FLAT_LANG=ru tools/ab/py tools/ab/draw_flat.py A 1 build/flat.png   # одна квартира: стены, двери, куда открываются
+node tools/hover_shot.mjs B 10 3 build/hover.png   # подсветка квартиры под курсором
 ```
 
 Текстуры, небо и деревья — CC0 (Poly Haven), см. `ASSETS.md`.

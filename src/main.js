@@ -4,7 +4,7 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { LETTER, PLACES, RESIDENTIAL, TOWERS, toScene, towerByKey } from './config.js';
 import { apartments, aptsOnFloor, summaryOf } from './data.js';
 import { buildWorld } from './world.js';
-import { loadComplex } from './building.js';
+import { OUTLINE, loadComplex } from './building.js';
 import { buildFloor } from './floor.js';
 import { WalkControls } from './walk.js';
 import { drawPlan, planTransform } from './plan.js';
@@ -199,19 +199,25 @@ function updateOverlays() {
   for (const a of apartments) {
     const u = building.units.get(a.id);
     if (!u) continue;
-    let show = false, color = 0xffffff, op = 0, edges = false;
+    let show = false, color = 0xffffff, op = 0, edges = null;
     const hoverFloor = sameFloor(state.hoverFloor, a);
     if (state.mode === 'overview' || state.mode === 'block') {
       if (hoverFloor) {
-        show = true; op = 0.42; edges = true; color = a === state.hoverApt ? 0xffffff : 0xfff3e0;
+        // the floor under the pointer: amber (it shows on the brick and on the white top floors
+        // alike), with a white outline round every flat
+        show = true; op = 0.62; edges = OUTLINE.floor; color = 0xffa42b;
       } else if (filterActive() && matches(a) && (state.mode === 'overview' || a.tower === state.tower)) {
         show = true; color = ACCENT; op = 0.55;
       }
     } else if (state.mode === 'floor') {
       if (isOpen(a)) {
-        show = true; edges = true; color = ACCENT;
-        op = a === state.apt ? 0.32 : a === state.hoverApt ? 0.24 : 0.06;
-        if (filterActive() && !matches(a)) op = 0.0;
+        // the flats of the open floor: a light outline each; the one under the pointer (or chosen)
+        // lit up in amber with a thick outline drawn over the walls and furniture
+        const lit = a === state.apt || a === state.hoverApt;
+        show = true; color = lit ? 0xffa42b : ACCENT;
+        edges = a === state.apt ? OUTLINE.chosen : a === state.hoverApt ? OUTLINE.hover : OUTLINE.open;
+        op = a === state.apt ? 0.48 : a === state.hoverApt ? 0.44 : 0.06;
+        if (filterActive() && !matches(a)) [op, edges] = [0.0, null];
       } else if (hoverFloor) {
         show = true; op = 0.35;
       }
@@ -219,8 +225,13 @@ function updateOverlays() {
     u.overlay.visible = show;
     u.overlay.material.color.setHex(color);
     u.overlay.material.opacity = op;
-    u.edges.visible = show && edges;
-    u.edges.material.color.setHex(state.mode === 'floor' ? color : 0xffffff);
+    // a floor seen from outside: the outline of every flat's volume; the open floor: each flat's
+    // outline on the floor plan
+    const line = state.mode === 'floor' ? u.ring : u.edges;
+    (line === u.ring ? u.edges : u.ring).visible = false;
+    line.visible = show && !!edges;
+    if (edges) line.material = edges;
+    line.renderOrder = edges === OUTLINE.hover || edges === OUTLINE.chosen ? 12 : 11;
   }
 }
 

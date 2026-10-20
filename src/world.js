@@ -13,8 +13,9 @@ import { Q } from './quality.js';
 import skyInfo from '../public/env/sky.json';
 
 const ENV = `${import.meta.env.BASE_URL}env/`;
-const SKY_INTENSITY = 1.0;
-const SUN_INTENSITY = 3.4;
+// soft, bright daylight like the marketing renders: more sky, a little less sun
+const SKY_INTENSITY = 1.35;
+const SUN_INTENSITY = 3.0;
 const HAZE = new THREE.Color(0xcad6e0);
 
 function rng(seed) {

@@ -68,10 +68,9 @@ export function interiorPoint(p) {
   return best ?? centroid(p);
 }
 
-// The largest axis-aligned rectangle (grown from the interior point) that fits inside a polygon.
+// The largest axis-aligned rectangle that fits inside a polygon: grown from the interior point,
+// or, where that growth stops in one leg of an L-shaped room, the largest rectangle on a 10 cm grid
 export function innerRect(p, margin = 0.08) {
-  const [cx, cy] = interiorPoint(p);
-  let r = { x0: cx - 0.2, y0: cy - 0.2, x1: cx + 0.2, y1: cy + 0.2 };
   const fits = (q) => {
     const steps = 6;
     for (let i = 0; i <= steps; i++) {
@@ -82,15 +81,64 @@ export function innerRect(p, margin = 0.08) {
     }
     return true;
   };
-  let grew = true;
-  while (grew) {
-    grew = false;
-    for (const k of ['x0', 'x1', 'y0', 'y1']) {
-      const q = { ...r, [k]: r[k] + (k.endsWith('0') ? -0.1 : 0.1) };
-      if (fits(q)) { r = q; grew = true; }
+  const grow = (r, step) => {
+    let grew = true;
+    while (grew) {
+      grew = false;
+      for (const k of ['x0', 'x1', 'y0', 'y1']) {
+        const q = { ...r, [k]: r[k] + (k.endsWith('0') ? -step : step) };
+        if (fits(q)) { r = q; grew = true; }
+      }
+    }
+    return r;
+  };
+  const [cx, cy] = interiorPoint(p);
+  const r = grow({ x0: cx - 0.2, y0: cy - 0.2, x1: cx + 0.2, y1: cy + 0.2 }, 0.1);
+  const area = (q) => (q.x1 - q.x0) * (q.y1 - q.y0);
+  let g = gridRect(p, margin);
+  if (!g) return r;
+  for (let i = 0; i < 5 && !fits(g); i++) g = { x0: g.x0 + 0.02, y0: g.y0 + 0.02, x1: g.x1 - 0.02, y1: g.y1 - 0.02 };
+  if (!fits(g)) return r;
+  g = grow(grow(g, 0.1), 0.02);
+  return area(g) > area(r) * 1.15 ? g : r;
+}
+
+// the largest rectangle of 10 cm cells whose corners all lie inside the polygon, `margin` from its
+// edges (the maximal rectangle of a 0/1 grid, row by row over column heights)
+function gridRect(p, margin) {
+  const b = bounds(p), c = 0.1;
+  const nx = Math.floor((b.x1 - b.x0) / c), ny = Math.floor((b.y1 - b.y0) / c);
+  if (nx < 2 || ny < 2 || nx * ny > 40000) return null;
+  const ok = [];
+  for (let j = 0; j <= ny; j++) {
+    const row = new Uint8Array(nx + 1);
+    for (let i = 0; i <= nx; i++) {
+      const x = b.x0 + i * c, y = b.y0 + j * c;
+      row[i] = inside(p, x, y) && edgeDist(p, x, y) >= margin ? 1 : 0;
+    }
+    ok.push(row);
+  }
+  // cell (i, j): between grid points i..i+1 and j..j+1
+  const h = new Int32Array(nx);
+  let best = null, bestA = 0;
+  for (let j = 0; j < ny; j++) {
+    for (let i = 0; i < nx; i++) h[i] = ok[j][i] && ok[j][i + 1] && ok[j + 1][i] && ok[j + 1][i + 1] ? h[i] + 1 : 0;
+    const stack = [];
+    for (let i = 0; i <= nx; i++) {
+      const hi = i < nx ? h[i] : 0;
+      let start = i;
+      while (stack.length && stack[stack.length - 1][1] >= hi) {
+        const [s0, hs] = stack.pop();
+        if (hs * (i - s0) > bestA) {
+          bestA = hs * (i - s0);
+          best = { x0: b.x0 + s0 * c, x1: b.x0 + i * c, y0: b.y0 + (j + 1 - hs) * c, y1: b.y0 + (j + 1) * c };
+        }
+        start = s0;
+      }
+      stack.push([start, hi]);
     }
   }
-  return r;
+  return best;
 }
 
 function edgeDist(p, x, y) {

@@ -9,7 +9,7 @@ export const VIEWS = {
   // like render 1: blocks Б and В from the street to the south
   // the camera of render 1 (from the park south of the avenue) and of render 2 (from the south-west)
   render1: { pos: [-10, 24, 250], target: [-22, 30, 0], noCity: true },
-  render2: { pos: [-300, 14, -260], target: [-60, 42, 0], noCity: true },
+  render2: { pos: [-330, 12, -40], target: [-40, 40, 0], noCity: true },
   a_west: { pos: [-234, 40, 85.5], target: [-99, 40, 19.5] },
   a_south: { pos: [-99 + 0.44 * 150, 40, 19.5 + 0.9 * 150], target: [-99, 40, 19.5] },
   a_north: { pos: [-99 - 0.44 * 150, 40, 19.5 - 0.9 * 150], target: [-99, 40, 19.5] },
@@ -17,6 +17,11 @@ export const VIEWS = {
   // render 3: the shop front of block Б from the pavement, block A's podium in the distance
   render3: { pos: [-5, 2.2, 70], target: [-45, 9, 48], noCity: true },
   poster: { pos: [-22, 4, 62], target: [-30, 4, 46], noCity: true },
+  // the user's screenshot of 20.10: from the north-west over the kindergarten
+  user_nw: { pos: [-210, 95, -190], target: [-40, 25, -10] },
+  mid_stripe: { pos: [-20, 40, 120], target: [-30, 40, 30], noCity: true },
+  // block Б's street face straight on, like render 1 (camera on the avenue, 1.7 m up... raised to see the top)
+  b_front: { pos: [-33.6 + 0.42 * 190, 40, 31 + 0.906 * 190], target: [-33.6, 38, 31], noCity: true },
   win_close: { pos: [-20, 30, 55], target: [-28, 30, 30] },
   street: { pos: [10, 9, 120], target: [5, 38, 20] },
   // like render 2: from the south-west, the glass tower in front

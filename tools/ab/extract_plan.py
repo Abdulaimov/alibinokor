@@ -253,7 +253,7 @@ class Sheet:
         return out
 
 
-def door_symbols(sh, gaps, room_geom):
+def door_symbols(sh, gaps, room_geom, swings=None):
     """Doorways from the door symbols (block A sheets draw them as short strokes: leaf, swing,
     ticks at the jambs). Each symbol is a door-sized cluster of strokes against a wall: the doorway is
     its extent along that wall, cut through the whole wall thickness. Only between rooms of one flat,
@@ -301,6 +301,12 @@ def door_symbols(sh, gaps, room_geom):
         if sides[0] != sides[1] and not any(common):
             continue  # a wall between two flats
         T = 0.6
+        if swings is not None:
+            # the side the door opens to: where the leaf and its swing are drawn
+            side = (b.centroid.x - mid[0]) * nx + (b.centroid.y - mid[1]) * ny
+            if abs(side) > 0.08:
+                k = 0.5 if side > 0 else -0.5
+                swings.append((round(mid[0], 3), round(mid[1], 3), round(mid[0] + nx * k, 3), round(mid[1] + ny * k, 3)))
         out.append(Polygon([(o.x + ux * s0 + nx * T, o.y + uy * s0 + ny * T), (o.x + ux * s1 + nx * T, o.y + uy * s1 + ny * T),
                             (o.x + ux * s1 - nx * T, o.y + uy * s1 - ny * T), (o.x + ux * s0 - nx * T, o.y + uy * s0 - ny * T)]))
     return out
@@ -338,6 +344,25 @@ def door_openings(sh, walls_hint):
     return out
 
 
+def drop_lettering(walls, struct):
+    """Black lettering on the sheets (the lift capacities "Q=1000 кг", dimensions) is filled the
+    same black as the walls: clusters of small pieces that touch no real wall are taken out."""
+    comps = parts(walls)
+    big = unary_union([c for c in comps if c.area >= 0.3] + [struct])
+    small = [c for c in comps if c.area < 0.3]
+    clusters = parts(unary_union([c.buffer(0.15) for c in small])) if small else []
+    drop = []
+    for cl in clusters:
+        mine = [c for c in small if cl.contains(c.representative_point())]
+        total = sum(c.area for c in mine)
+        if len(mine) >= 2 and total < 0.5 and all(c.area < 0.06 for c in mine) and min(c.distance(big) for c in mine) > 0.03:
+            drop += mine
+    if drop:
+        walls = walls.difference(unary_union([c.buffer(0.002) for c in drop]))
+        print('  lettering left out: %d pieces' % len(drop))
+    return walls
+
+
 def extract(key):
     sh = Sheet(key)
     by = sh.fills()
@@ -349,23 +374,57 @@ def extract(key):
 
     # columns and concrete walls: closed outlines
     lines = [LineString(s) for col in STRUCT_STROKES for s in sh.strokes(col)]
-    struct = [p for p in polygonize(unary_union(lines)) if p.area > 0.03]
+    # (letters drawn in the same blue - the lift capacities "Q=1000 кг" - are no columns: they are
+    # small and far from solid, a column or a wall piece is a near rectangle)
+    struct = [p for p in polygonize(unary_union(lines))
+              if p.area > 0.03 and not (p.area < 0.6 and p.area < 0.75 * p.minimum_rotated_rectangle.area)]
     struct = snap(unary_union([p.buffer(0.005) for p in struct]))
 
     rooms_all = unary_union(list(room_geom.values()))
     fill_walls = snap(unary_union([p.buffer(0.004) for p in by.get(WALL_FILL, [])]).buffer(-0.004))
     doors = []
+    outline_walls = Polygon()
     if sh.info['walls'] == 'gaps':
         # walls are the strips between the rooms (up to 0.7 m), less the doorways
         closed = rooms_all.buffer(0.35, join_style='mitre').buffer(-0.35, join_style='mitre')
         gaps = closed.difference(rooms_all)
         doors = door_symbols(sh, gaps, room_geom)
         walls = gaps.difference(unary_union(doors)) if doors else gaps
+        # where two room fills touch, the wall between them is only its two outlines (thin grey
+        # lines, partitions in black): the thin cells between those lines are walls too
+        outline_lines = [LineString(s) for s in sh.strokes((0.41, 0.41, 0.41), 0.06)] + \
+                        [LineString(s) for s in sh.strokes((0.0, 0.0, 0.0), 0.84)]
+        # (inside the plan only: the facade is the curtain wall, read from the room outlines)
+        prov = unary_union([rooms_all, gaps]).buffer(0.45, join_style='mitre').buffer(-0.45, join_style='mitre')
+        prov = max(parts(prov), key=lambda q: q.area)
+        facade_band = prov.exterior.buffer(0.8)
+        thin = [q for q in polygonize(unary_union(outline_lines))
+                if q.area > 0.02 and 2 * q.area / q.length < 0.32 and not q.intersects(facade_band)
+                and q.intersection(rooms_all).area > 0.3 * q.area]
+        if thin:
+            ow = unary_union([q.buffer(0.01) for q in thin])
+            if doors:
+                ow = ow.difference(unary_union(doors))
+            outline_walls = ow
+            walls = unary_union([walls, ow])
         walls = unary_union([walls, fill_walls])
         walls = unary_union([g for g in parts(walls.buffer(-0.02).buffer(0.02)) if g.area > 0.02])
     else:
         walls = fill_walls
+        # doors drawn over a wall line (the wall runs on under the door leaf): cut at the door symbol
+        closed = rooms_all.buffer(0.35, join_style='mitre').buffer(-0.35, join_style='mitre')
+        gaps = closed.difference(rooms_all)
+        doors = door_symbols(sh, gaps, room_geom)
+        keep_w = sh.info['door_w']
+        sh.info['door_w'] = 0.84
+        doors += door_symbols(sh, gaps, room_geom)
+        sh.info['door_w'] = keep_w
+        if doors:
+            # only through the wall between the two rooms (not along it into the next room)
+            cut = unary_union(doors).intersection(gaps.buffer(0.02))
+            walls = walls.difference(cut)
     walls = snap(walls.difference(struct))
+    walls = drop_lettering(walls, struct)
 
     everything = unary_union([walls, struct, rooms_all])
     enclosure = everything.buffer(0.45, join_style='mitre').buffer(-0.45, join_style='mitre')
@@ -376,12 +435,14 @@ def extract(key):
     # a room is its fill less the walls and shafts drawn over it (some fills run on under a shaft);
     # columns standing inside a room stay part of it (the viewer draws them in the room)
     solid = unary_union([walls, struct])
-    for c, g in room_geom.items():
-        g = g.difference(walls).difference(struct.buffer(0.01)) if not g.is_empty else g
+    for c, g0 in room_geom.items():
+        g = g0.difference(walls).difference(struct.buffer(0.01)) if not g0.is_empty else g0
         for q in parts(g.buffer(-0.02).buffer(0.02)):
             q = Polygon(q.exterior) if q.interiors and all(Polygon(h).area < 2.5 for h in q.interiors) else q
             if q.area >= 0.6:
-                rooms.append(dict(colour=c, poly=q, common=c in COMMON_FILL))
+                # the fill as drawn (before the walls drawn over it): what the sheet's areas are of
+                fill = sum(f.area for f in parts(g0) if f.buffer(0.3).intersects(q.representative_point().buffer(0.01)) and f.intersection(q).area > 0.5 * q.area)
+                rooms.append(dict(colour=c, poly=q, common=c in COMMON_FILL, fill_area=fill or q.area))
 
     fixtures = parts(unary_union([LineString(s).buffer(0.03) for s in sh.strokes(FIXTURE_STROKE)]))
     fixtures = [p.minimum_rotated_rectangle for p in fixtures if p.area > 0.05]
@@ -396,6 +457,11 @@ def extract(key):
         r['width'] = min_width(p)
         r['label'] = room_name(p, gl)
         r['kind'] = classify(r)
+    # the outlines between a room and its loggia or terrace are the glass front (block A): no wall
+    # (the small service balconies keep their drawn walls)
+    air = unary_union([r['poly'] for r in rooms if r['kind'] in ('loggia', 'terrace') and r['area'] > SMALL_LOGGIA_AREA])
+    if not outline_walls.is_empty and not air.is_empty:
+        walls = snap(walls.difference(outline_walls.intersection(air.buffer(0.45))))
     return sh, dict(rooms=rooms, walls=walls, struct=struct, enclosure=enclosure, outside=outside, fixtures=fixtures,
                     doors_balc=doors_balc, doors=doors, apt_colours=apt_colours)
 
@@ -435,7 +501,8 @@ def group_apartments(key, x):
     for f in flats:
         f['rooms_count'] = sum(1 for r in f['rooms'] if r['kind'] in ('bedroom', 'living'))
         f['drawn_area'] = sum(r['area'] for r in f['rooms'])
-    pairs = sorted(((abs(f['drawn_area'] - a) + (0 if n == f['rooms_count'] else 25), i, j)
+        f['fill_area'] = sum(r.get('fill_area', r['area']) for r in f['rooms'])
+    pairs = sorted(((abs(f['fill_area'] - a) + (0 if n == f['rooms_count'] else 25), i, j)
                     for i, f in enumerate(flats) for j, (n, a) in enumerate(labels)))
     used_f, used_l = set(), set()
     for cost, i, j in pairs:
@@ -445,6 +512,87 @@ def group_apartments(key, x):
         used_l.add(j)
         flats[i]['label'] = labels[j]
     return flats
+
+
+def tower_glazing(x):
+    """Block A is glazed floor to ceiling: every stretch of a room's outline that looks out (the
+    facade, or a loggia / terrace across it) is glass, whatever the drawing's wall lines say, but
+    for the doors to the terraces (one door from a room to each terrace: at the drawn swing, else in
+    the middle of its longest glass) and the columns. The small loggias (service balconies) keep
+    their drawn walls and door. Returns the glazing pieces; the walls under them are taken out."""
+    rooms = x['rooms']
+    struct = x['struct']
+    outside = x['outside']
+    air_rooms = [r for r in rooms if r['kind'] in ('loggia', 'terrace') and r['poly'].area > SMALL_LOGGIA_AREA]
+    small_air = [r for r in rooms if r['kind'] in ('loggia', 'terrace') and r['poly'].area <= SMALL_LOGGIA_AREA]
+    flat_of = {id(r): fi for fi, f in enumerate(x.get('flats', [])) for r in f['rooms']}
+    door_swings = unary_union([d.buffer(0.05) for d in x['doors_balc']]) if x['doors_balc'] else Polygon()
+    pieces, cuts, door_runs = [], [], {}
+    for r in rooms:
+        if r['common'] or r['kind'] in ('loggia', 'terrace', 'bath', 'wc', 'storage', 'hall'):
+            continue
+        p = r['poly'].simplify(0.02)
+        cs = list(p.exterior.coords)
+        if not p.exterior.is_ccw:
+            cs = cs[::-1]
+        for a, b in zip(cs, cs[1:]):
+            L = math.dist(a, b)
+            if L < 0.3:
+                continue
+            ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
+            nx, ny = uy, -ux   # outward
+            n = max(1, int(L / 0.1))
+            run = None
+            for i in range(n + 1):
+                t = min(L, i * L / n)
+                q = (a[0] + ux * t, a[1] + uy * t)
+                probe = LineString([(q[0] + nx * 0.02, q[1] + ny * 0.02), (q[0] + nx * 0.9, q[1] + ny * 0.9)])
+                hit_out = probe.intersects(outside)
+                mine = flat_of.get(id(r))
+                hit_air = next((ar for ar in air_rooms if probe.intersects(ar['poly']) and flat_of.get(id(ar)) == mine), None)
+                # anything else across (another room, or another flat's loggia): no glass here
+                other = any(o is not r and o is not hit_air and probe.intersects(o['poly']) and
+                            (o['kind'] not in ('loggia', 'terrace') or flat_of.get(id(o)) != mine or o in small_air) for o in rooms)
+                ok = (hit_out or hit_air) and not other
+                if ok and run is None:
+                    run = [t, t, hit_air]
+                elif ok:
+                    run[1] = t
+                if (not ok or i == n) and run is not None:
+                    t0, t1, air = run
+                    run = None
+                    if t1 - t0 < 0.4:
+                        continue
+                    depth = 0.9 if not air else max(0.15, min(0.9, air['poly'].distance(Point(a[0] + ux * (t0 + t1) / 2, a[1] + uy * (t0 + t1) / 2)) + 0.02))
+                    g0 = (a[0] + ux * t0, a[1] + uy * t0)
+                    g1 = (a[0] + ux * t1, a[1] + uy * t1)
+                    poly = Polygon([g0, g1, (g1[0] + nx * depth, g1[1] + ny * depth), (g0[0] + nx * depth, g0[1] + ny * depth)])
+                    if not air:
+                        poly = poly.difference(outside.buffer(-0.01))   # up to the facade line
+                    else:
+                        poly = poly.difference(air['poly'])
+                        span = LineString([g0, g1])
+                        d = door_swings.intersection(span.buffer(0.9)) if not door_swings.is_empty else Polygon()
+                        door_runs.setdefault((id(r), id(air)), []).append(dict(poly=poly, span=span, swing=d))
+                        continue
+                    poly = poly.difference(struct)
+                    pieces += [g for g in parts(poly) if g.area > 0.03]
+    # one door from a room to each terrace: at the drawn swing (the longest such run), else in the
+    # middle of the longest run of glass; the other runs are glass all along
+    for runs in door_runs.values():
+        swung = [g for g in runs if not g['swing'].is_empty]
+        at = max(swung or runs, key=lambda g: g['span'].length)
+        for g in runs:
+            poly = g['poly']
+            if g is at:
+                span = g['span']
+                c = span.interpolate(span.project(g['swing'].centroid)) if not g['swing'].is_empty else span.interpolate(0.5, normalized=True)
+                cut = c.buffer(0.46, cap_style='square')
+                cuts.append(poly.intersection(cut).buffer(0.03))
+                poly = poly.difference(cut)
+            poly = poly.difference(struct)
+            pieces += [h for h in parts(poly) if h.area > 0.03]
+    return pieces, cuts
 
 
 def openings(key, x):
@@ -483,6 +631,9 @@ def openings(key, x):
                     air = [q for q in across if q['kind'] in open_air]
                     if mine_air or not air or len(air) != len(across):
                         continue  # a doorway between rooms (the viewer puts a door there), or seen from the loggia
+                    if glass_tower and f.length <= 1.3 and all(q['poly'].area <= SMALL_LOGGIA_AREA for q in air):
+                        door_to.add(id(air[0]))
+                        continue  # block A's service balconies: walls and a door, the door's gap no window
                 elif mine_air and (glass_tower or r['kind'] == 'terrace'):
                     continue  # the open edge of a balcony or terrace: a railing, not a window
                 # how far out the wall reaches next to the opening
@@ -501,10 +652,26 @@ def openings(key, x):
                 if across and doors is not None:
                     d = doors.intersection(strip.buffer(0.9))
                     if not d.is_empty:
-                        ss = [((c[0] - fa[0]) * ux + (c[1] - fa[1]) * uy) for g in parts(d) for c in g.exterior.coords]
-                        s0, s1 = max(0.0, min(ss)), min(f.length, max(ss))
-                        if s1 - s0 > 0.5:
-                            spans = [(0.0, s0 - 0.02), (s1 + 0.02, f.length)]
+                        cut = []
+                        for g in parts(d):
+                            ss = [((c[0] - fa[0]) * ux + (c[1] - fa[1]) * uy) for c in g.exterior.coords]
+                            lo, hi = min(ss), max(ss)
+                            if hi - lo > 0.4:
+                                # the swing spans the leaf: that is the door, 0.8-1.0 m wide
+                                m, w = (lo + hi) / 2, min(max(hi - lo, 0.8), 1.0)
+                                lo, hi = m - w / 2, m + w / 2
+                                if lo < 0:
+                                    lo, hi = 0.0, min(f.length, w)
+                                if hi > f.length:
+                                    lo, hi = max(0.0, f.length - w), f.length
+                                cut.append((lo, hi))
+                        if cut:
+                            cut.sort()
+                            spans, at = [], 0.0
+                            for lo, hi in cut:
+                                spans.append((at, lo - 0.02))
+                                at = hi + 0.02
+                            spans.append((at, f.length))
                             door_to.add(id(across[0]))
                 if across:
                     candidates.append((f.length, id(across[0]), across[0], r, fa, fb, n, T, len(wins)))
@@ -560,10 +727,241 @@ def doorways(x):
     return out
 
 
+def facing(r, free, rooms, step=0.1, depth=0.6):
+    """Split the free stretches of room r's outline by what lies across them: [(room or None, line)].
+    Each 10 cm piece looks 0.6 m out from the room (the outline runs counter-clockwise, the room on
+    its left) and takes the room it overlaps most."""
+    out = []
+    for f in getattr(free, 'geoms', [free]):
+        if f.is_empty or f.geom_type != 'LineString' or f.length < 0.15:
+            continue
+        n = max(1, int(round(f.length / step)))
+        run_q, run_pts = 'start', []
+        ccw = r['poly'].exterior.is_ccw
+        for i in range(n):
+            a = f.interpolate(i / n, normalized=True)
+            b = f.interpolate((i + 1) / n, normalized=True)
+            dx, dy = b.x - a.x, b.y - a.y
+            L = math.hypot(dx, dy) or 1e-9
+            nx, ny = (dy / L, -dx / L) if ccw else (-dy / L, dx / L)
+            probe = Polygon([(a.x, a.y), (b.x, b.y), (b.x + nx * depth, b.y + ny * depth), (a.x + nx * depth, a.y + ny * depth)])
+            best, ba = None, 0.004
+            for q in rooms:
+                if q is r:
+                    continue
+                ar = probe.intersection(q['poly']).area
+                if ar > ba:
+                    best, ba = q, ar
+            if best is not run_q and run_pts:
+                out.append((run_q, LineString(run_pts)))
+                run_pts = []
+            if not run_pts:
+                run_pts = [(a.x, a.y)]
+            run_pts.append((b.x, b.y))
+            run_q = best
+        if len(run_pts) >= 2:
+            out.append((run_q, LineString(run_pts)))
+    return out
+
+
+def tidy_doors(sh, x):
+    """One way between two rooms, and only where the drawing has it.
+
+    The walls read off the sheet leave gaps (a wall drawn in another colour, a party wall that is
+    only a line, the end of a fill short of the wall): each gap between two rooms would be another
+    doorway. Every opening between two rooms is listed, then:
+      - between two flats (rooms, loggias or terraces): walled up;
+      - between two rooms of a flat, or a flat and the stair hall: one per pair, the one with a door
+        symbol on the drawing, else the most door-like;
+      - an opening with no door symbol that is not open plan (up to 1.4 m) is walled up too, as long
+        as every room of the flat can still be reached from the stair hall without it.
+    Openings from a room to its own loggia or terrace are left to the windows and balcony doors."""
+    rooms = x['rooms']
+    flat_of = {}
+    for fi, f in enumerate(x['flats']):
+        for r in f['rooms']:
+            flat_of[id(r)] = fi
+    # rooms that are in no flat (a small fill of its own colour): the flat of the room they open to
+    for r in rooms:
+        if id(r) in flat_of or r['common']:
+            continue
+        near = sorted((q for q in rooms if id(q) in flat_of), key=lambda q: q['poly'].distance(r['poly']))
+        if near and near[0]['poly'].distance(r['poly']) < 0.6:
+            flat_of[id(r)] = flat_of[id(near[0])]
+    room_geom = defaultdict(list)
+    for r in rooms:
+        room_geom[r['colour']].append(r['poly'])
+    room_geom = {c: unary_union(ps) for c, ps in room_geom.items()}
+    rooms_all = unary_union([r['poly'] for r in rooms])
+    zone = rooms_all.buffer(0.35, join_style='mitre').buffer(-0.35, join_style='mitre').difference(rooms_all)
+    syms, swings = [], []
+    keep_w = sh.info['door_w']
+    for w in sorted({keep_w, 0.84}):
+        sh.info['door_w'] = w
+        syms += door_symbols(sh, zone, room_geom, swings)
+    sh.info['door_w'] = keep_w
+    # (one per door: the first symbol found at a doorway)
+    x['swings'] = []
+    for q in swings:
+        if all(math.dist(q[:2], p[:2]) > 0.4 for p in x['swings']):
+            x['swings'].append(q)
+    sym_u = unary_union(syms) if syms else Polygon()
+    W = unary_union([x['walls'], x['struct']]).buffer(0.04)
+    air = ('loggia', 'terrace')
+    pairs = defaultdict(list)
+    seen = defaultdict(list)
+    voids = []   # free stretches inside the plan with no room across: walled up
+    facade = x['enclosure'].exterior
+    for r in rooms:
+        for q, g in facing(r, r['poly'].exterior.difference(W), rooms):
+            if q is None:
+                if g.distance(facade) > 0.8 and g.length >= 0.3:
+                    voids.append(g)
+                continue
+            if g.length < 0.3:
+                continue
+            k = frozenset((id(r), id(q)))
+            mid = g.interpolate(0.5, normalized=True)
+            if any(src != id(r) and mid.distance(o.interpolate(0.5, normalized=True)) < 0.7 for o, src in seen[k]):
+                continue  # the same opening, seen from the other room
+            seen[k].append((g, id(r)))
+            pairs[k].append(g)
+    by_id = {id(r): r for r in rooms}
+    sym_b = sym_u.buffer(0.05) if not sym_u.is_empty else sym_u
+    # a door symbol on this opening: it covers most of the opening's length
+    sym_hit = lambda f: (not sym_u.is_empty) and f.intersection(sym_b).length >= 0.6 * min(f.length, 0.9)
+    closed, edges = [], []
+    for k, segs in pairs.items():
+        a, b = (by_id[i] for i in k)
+        if a['common'] and b['common']:
+            continue
+        fa, fb = flat_of.get(id(a)), flat_of.get(id(b))
+        foreign = not (a['common'] or b['common']) and fa != fb
+        if foreign:
+            closed += [(f, a, b) for f in segs]
+            continue
+        if a['kind'] in air or b['kind'] in air:
+            continue
+        common = a['common'] or b['common']
+        score = lambda f: (sym_hit(f), -abs(f.length - 0.95) if common or f.length <= 1.4 else f.length)
+        best = max(segs, key=score)
+        closed += [(f, a, b) for f in segs if f is not best]
+        # open plan only between the day rooms (living room, kitchen, hall); a bedroom or a bathroom
+        # always has a door
+        day = ('living', 'kitchen', 'hall', 'common')
+        open_plan = best.length > 1.4 and a['kind'] in day and b['kind'] in day
+        # (a gap narrower than a door is never a door, whatever is drawn next to it)
+        # nobody walks into a bedroom through the kitchen: such a door stays only if it is the only way
+        odd_pair = {a['kind'], b['kind']} == {'bedroom', 'kitchen'}
+        edges.append(dict(a=a, b=b, f=best, flat=fa if fa is not None else fb,
+                          strong=((sym_hit(best) and best.length >= 0.62) or open_plan) and not odd_pair))
+    # weak openings (no door symbol, door-sized): walled up while the flat stays connected
+    def connected(flat, live):
+        nodes = [r for r in rooms if flat_of.get(id(r)) == flat and r['kind'] not in air]
+        if not nodes:
+            return True
+        adj = defaultdict(set)
+        for e in live:
+            ia = 'C' if e['a']['common'] else id(e['a'])
+            ib = 'C' if e['b']['common'] else id(e['b'])
+            adj[ia].add(ib)
+            adj[ib].add(ia)
+        seen, stack = {'C'}, ['C']
+        while stack:
+            n = stack.pop()
+            for m in adj[n] - seen:
+                seen.add(m)
+                stack.append(m)
+        return all(id(r) in seen for r in nodes)
+    kept = []
+    for flat in {e['flat'] for e in edges}:
+        live = [e for e in edges if e['flat'] == flat]
+        if not connected(flat, live):
+            continue  # (the drawing itself leaves something unreachable: change nothing)
+        # least door-like first (a 3 m gap goes before a 0.8 m one)
+        for e in sorted([e for e in live if not e['strong']], key=lambda e: -abs(e['f'].length - 0.85)):
+            trial = [o for o in live if o is not e]
+            if connected(flat, trial):
+                live = trial
+                closed.append((e['f'], e['a'], e['b']))
+        # bathrooms, WCs and wardrobes have one door: the most door-like (drawn, about 0.8 m)
+        for r in [r for r in rooms if flat_of.get(id(r)) == flat and r['kind'] in ('bath', 'wc', 'storage')]:
+            mine = [e for e in live if e['a'] is r or e['b'] is r]
+            mine.sort(key=lambda e: (not sym_hit(e['f']), abs(e['f'].length - 0.8)))
+            for e in mine[1:]:
+                trial = [o for o in live if o is not e]
+                if connected(flat, trial):
+                    live = trial
+                    closed.append((e['f'], e['a'], e['b']))
+        # a door into a bedroom, bathroom or wardrobe wider than a door (a gap in the drawing's wall):
+        # one door width of it stays open, at the door symbol if there is one, the rest is walled up
+        for e in live:
+            day_pair = e['a']['kind'] in ('living', 'kitchen', 'hall', 'common') and e['b']['kind'] in ('living', 'kitchen', 'hall', 'common')
+            f = e['f']
+            if day_pair or f.length <= 1.25:
+                continue
+            at = f.length / 2
+            if not sym_u.is_empty and f.intersection(sym_b).length > 0.3:
+                hit = f.intersection(sym_b)
+                c = hit.centroid if not hit.is_empty else f.interpolate(0.5, normalized=True)
+                at = min(max(f.project(c), 0.45), f.length - 0.45)
+            from shapely.ops import substring
+            for lo, hi in ((0.0, at - 0.43), (at + 0.43, f.length)):
+                if hi - lo > 0.05:
+                    closed.append((substring(f, lo, hi), e['a'], e['b']))
+            e['f'] = substring(f, at - 0.43, at + 0.43)
+        kept += live
+    dbg = os.environ.get('TIDY_DEBUG')
+    if dbg:
+        for f, a, b in closed:
+            if any(abs(r['area'] - float(dbg)) < 0.02 for r in (a, b)):
+                print('   closed', a['kind'], round(a['area'], 2), '<->', b['kind'], round(b['area'], 2), round(f.length, 2), [round(v, 2) for v in f.bounds])
+        for e in edges:
+            if any(abs(r['area'] - float(dbg)) < 0.02 for r in (e['a'], e['b'])):
+                print('   edge', e['a']['kind'], '<->', e['b']['kind'], round(e['f'].length, 2), 'strong' if e['strong'] else 'weak', [round(v, 2) for v in e['f'].bounds])
+    walls = []
+    for f, a, b in closed:
+        # the gap between the two rooms along this opening (not round the corner to the next one)
+        g = f.buffer(0.6, cap_style='flat').intersection(zone).intersection(a['poly'].buffer(0.65)).intersection(b['poly'].buffer(0.65))
+        if g.area < 0.03:
+            g = f.buffer(0.1, cap_style='flat')
+        walls.append(g)
+    walls += [f.buffer(0.12, cap_style='flat') for f in voids]
+    closed = closed + voids
+    # never across a door that stays (a patch for the next opening can reach round the corner)
+    keep_clear = unary_union([e['f'].buffer(0.6, cap_style='flat').intersection(zone).intersection(e['a']['poly'].buffer(0.65))
+                              .intersection(e['b']['poly'].buffer(0.65)).buffer(0.02) for e in kept]) if kept else Polygon()
+    walls = [w.difference(keep_clear) for w in walls]
+    if walls:
+        x['walls'] = snap(unary_union([x['walls']] + walls).difference(x['struct']))
+    # last pass: slots left narrower than a door, or into another flat, are closed with a thin wall
+    W2 = unary_union([x['walls'], x['struct']]).buffer(0.04)
+    kept_lines = unary_union([e['f'].buffer(0.12) for e in kept]) if kept else Polygon()
+    slots = []
+    for r in rooms:
+        for q, g in facing(r, r['poly'].exterior.difference(W2), rooms):
+            if q is None or g.length < 0.05:
+                continue
+            fq, fr = flat_of.get(id(q)), flat_of.get(id(r))
+            foreign = not (q['common'] or r['common']) and fq != fr
+            if foreign or (g.length < 0.62 and not kept_lines.contains(g)):
+                slots.append(g.buffer(0.12, cap_style='flat'))
+    if slots:
+        x['walls'] = snap(unary_union([x['walls']] + slots).difference(x['struct']))
+    print('  doors: %d connections, %d openings walled up, %d door symbols' % (len(edges), len(closed), len(syms)))
+
+
 def build(key):
     sh, x = extract(key)
     x['flats'] = group_apartments(key, x)
+    tidy_doors(sh, x)
     x['windows'], x['glazing'] = openings(key, x)
+    if key.startswith('A'):
+        tg, door_cuts = tower_glazing(x)
+        x['glazing'] = [g for g in parts(unary_union(x['glazing'] + tg))]
+        # (the doors to the terraces: through the wall lines drawn there)
+        x['walls'] = snap(x['walls'].difference(unary_union(tg + door_cuts).buffer(0.005)).difference(x['struct']))
+        x['glazing'] = [g for g in parts(unary_union(x['glazing']).difference(unary_union(door_cuts)))]
     # fittings read from the drawing that lie across a doorway (a door swing caught in with a bath
     # or a sink): left out, the viewer furnishes the room itself
     ways = unary_union([d.buffer(0.3) for d in doorways(x)])
@@ -600,7 +998,8 @@ def to_json(key, x):
     common = [ring(r['poly']) for r in x['rooms'] if r['common']]
     return dict(title=SHEET_INFO[key]['title'], slab=ring(enc), enclosure=ring(enc), walls=rings(x['walls']),
                 struct=rings(x['struct']), windows=[ring(w) for w in x['windows']], glazing=[ring(g) for g in x['glazing']],
-                common=common, apartments=flats)
+                common=common, apartments=flats,
+                swings=[[p[0], p[1], p[2], p[3]] for p in x.get('swings', [])])
 
 
 def draw_debug(key, x, scale=40):
