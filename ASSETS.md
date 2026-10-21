@@ -27,6 +27,7 @@ neutral grey, sun disc removed from the sky). Licence: https://polyhaven.com/lic
 | [Fir Sapling Medium](https://polyhaven.com/a/fir_sapling_medium) | Rob Tuytel, Rico Cilliers | conifers (two variants) | rendered into `public/trees/` |
 | [Pine Sapling Small](https://polyhaven.com/a/pine_sapling_small) | Rob Tuytel, Rico Cilliers | tall narrow trees | rendered into `public/trees/` |
 | [Searsia Lucida](https://polyhaven.com/a/searsia_lucida) | James Ray Cock, Jenelle van Heerden | small ornamental trees | rendered into `public/trees/` |
+| [Island Tree 02](https://polyhaven.com/a/island_tree_02) | Rob Tuytel, Rico Cilliers | full-crowned broadleaf trees (courtyards, school) | rendered into `public/trees/` (atlas c) |
 
 Authors as listed by the Poly Haven API (api.polyhaven.com/info/<asset>) on 13 Oct 2026.
 

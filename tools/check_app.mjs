@@ -131,8 +131,18 @@ const walks = await page.evaluate(async () => {
       }
     }
     const reached = hit.size;
-    // try to walk out through each wall of the flat's outline: the visitor must stay inside
+    // try to walk out through each wall of the flat's outline: the visitor must stay inside (or
+    // out on the flat's own balconies and terraces, within a wall's thickness of them)
     let escaped = 0;
+    const near = (poly, x, y) => {
+      if (inPoly(poly, x, y)) return true;
+      for (let i = 0, j = poly.length - 1; i < poly.length; j = i++) {
+        const [ax, ay] = poly[j], [bx, by] = poly[i], dx = bx - ax, dy = by - ay, L = dx * dx + dy * dy;
+        const t = L ? Math.max(0, Math.min(1, ((x - ax) * dx + (y - ay) * dy) / L)) : 0;
+        if (Math.hypot(x - ax - t * dx, y - ay - t * dy) < 0.4) return true;
+      }
+      return false;
+    };
     for (let k = 0; k < 24; k++) {
       const ang = (k / 24) * Math.PI * 2;
       let p = { ...pos };
@@ -145,7 +155,7 @@ const walks = await page.evaluate(async () => {
         const [xi, yi] = poly[i], [xj, yj] = poly[j];
         if (yi > lp.y !== yj > lp.y && lp.x < ((xj - xi) * (lp.y - yi)) / (yj - yi) + xi) inside = !inside;
       }
-      if (!inside) escaped++;
+      if (!inside && !a.data.balconies.some((b) => inPoly(b.poly, lp.x, lp.y) || (near(b.poly, lp.x, lp.y) && near(a.data.outline, lp.x, lp.y)))) escaped++;
     }
     out.push({ id, rooms: rooms.length, reached, escaped, mode: app.state.mode, missing: rooms.filter((r, i) => !hit.has(i)).map((r) => `${r.kind} ${r.area}`) });
     app.exitWalk();

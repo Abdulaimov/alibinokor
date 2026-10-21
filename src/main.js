@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { LETTER, PLACES, RESIDENTIAL, TOWERS, toScene, towerByKey } from './config.js';
+import { LETTER, PLACES, RESIDENTIAL, TOWERS, planFrame, toScene, towerByKey } from './config.js';
+import { bounds, interiorPoint } from './geometry.js';
 import { apartments, aptsOnFloor, summaryOf } from './data.js';
 import { buildWorld } from './world.js';
 import { OUTLINE, loadComplex } from './building.js';
@@ -70,9 +71,9 @@ THREE.DefaultLoadingManager.onProgress = shadowsDirty;
 
 const camera = new THREE.PerspectiveCamera(38, innerWidth / innerHeight, 1, 30000);
 // Start view: the whole complex from the south-west, over the street, the mountains behind it.
-const HOME_WIDE = { pos: new THREE.Vector3(-150, 165, 285), target: new THREE.Vector3(5, 22, -5) };
+const HOME_WIDE = { pos: new THREE.Vector3(-178, 192, 330), target: new THREE.Vector3(-2, 20, -2) };
 // portrait: the panel covers the lower half, so the camera aims below the complex (it shows higher up)
-const HOME_TALL = { pos: new THREE.Vector3(-420, 520, 700), target: new THREE.Vector3(-10, -60, 90) };
+const HOME_TALL = { pos: new THREE.Vector3(-462, 572, 770), target: new THREE.Vector3(-11, -66, 99) };
 const home = () => (innerWidth < innerHeight ? HOME_TALL : HOME_WIDE);
 camera.position.copy(home().pos);
 
@@ -176,10 +177,21 @@ function floorCentre(tower, floor) {
 function floorView(tower, floor) {
   // far enough for the whole floor to fit between the side panels (slab blocks 64 m, tower A 45 m)
   const target = floorCentre(tower, floor);
-  const az = azimuth();
+  let az = azimuth();
+  if (tower !== 'A') {
+    // a slab block from its long side (the side nearer the camera): the flats in two rows, side by
+    // side across the screen, their tags in two rows too
+    const fr = planFrame(towerByKey[tower]);
+    const o = fr.toScene(0, 0), y1 = fr.toScene(0, 1);
+    const side = Math.atan2(y1.x - o.x, y1.z - o.z);
+    const off = (a) => Math.abs(Math.atan2(Math.sin(a - az), Math.cos(a - az)));
+    az = off(side) <= off(side + Math.PI) ? side : side + Math.PI;
+  }
   const size = tower === 'A' ? 46 : 66;
   const d = size * (innerWidth < innerHeight ? 2.6 : 1.75);
-  return { pos: target.clone().add(new THREE.Vector3(Math.sin(az) * d * 0.55, d * 0.85, Math.cos(az) * d * 0.55)), target };
+  // (slab blocks steeper from above: the two rows of flats and their tags well apart)
+  const [hz, vt] = tower === 'A' ? [0.55, 0.85] : [0.42, 0.9];
+  return { pos: target.clone().add(new THREE.Vector3(Math.sin(az) * d * hz, d * vt, Math.cos(az) * d * hz)), target };
 }
 function aptView(apt) {
   const c = building.units.get(apt.id).center;
@@ -242,29 +254,44 @@ function sidesText(a) {
   return a.sides.map((s) => L().sides[s]).join(', ');
 }
 let liftLabels = [];
+// the point a flat's tag points at: inside the flat (the point furthest from its walls), on top of
+// the cut walls of the open floor
+function tagAnchor(a) {
+  const u = building.units.get(a.id);
+  const [px, py] = interiorPoint(a.data.outline);
+  const s = planFrame(towerByKey[a.tower]).toScene(px, py);
+  return new THREE.Vector3(s.x, u.top + 0.15, s.z);
+}
 function buildLabels() {
   labelsEl.innerHTML = '';
   labels = [];
   liftLabels = [];
   if (state.mode !== 'floor') return;
+  const add = (cls, html) => {
+    const el = document.createElement('div');
+    el.className = cls;
+    el.innerHTML = html;
+    const line = document.createElement('i');
+    line.className = 'tag-line';
+    const dot = document.createElement('i');
+    dot.className = 'tag-dot';
+    labelsEl.append(line, dot, el);
+    return { el, line, dot };
+  };
   // the lifts of the open floor, as on the drawings: how many, and their capacities
   for (const t of dollhouse[0]?.liftTags ?? []) {
-    const el = document.createElement('div');
-    el.className = 'tag lift';
-    el.innerHTML = `<b>${L().lifts(t.q.length)}</b> <span>· Q ${t.q.join(' / ')} ${L().kg}</span>`;
-    labelsEl.appendChild(el);
-    liftLabels.push({ el, pos: new THREE.Vector3(t.x, t.y, t.z) });
+    const tag = add('tag lift', `<b>${L().lifts(t.q.length)}</b><span>Q ${t.q.join(' / ')} ${L().kg}</span>`);
+    liftLabels.push({ ...tag, pos: new THREE.Vector3(t.x, t.y, t.z) });
   }
   for (const a of aptsOnFloor(state.tower, state.floor)) {
-    const el = document.createElement('div');
-    el.className = 'tag';
-    el.innerHTML = `<b>№ ${a.number}</b> <span>· ${L().roomsShort(a.rooms)} · ${num(a.area)} ${L().m2}</span>`;
-    el.onclick = () => selectApt(a);
-    el.onpointerenter = () => setHover(a);
-    el.onpointerleave = () => setHover(null);
-    labelsEl.appendChild(el);
-    labels.push({ el, apt: a });
+    const tag = add('tag', `<b>№ ${a.number}</b><span>${num(a.area)} ${L().m2}</span>`);
+    tag.el.title = `№ ${a.number} · ${L().roomsShort(a.rooms)} · ${num(a.area)} ${L().m2}`;
+    tag.el.onclick = () => selectApt(a);
+    tag.el.onpointerenter = () => setHover(a);
+    tag.el.onpointerleave = () => setHover(null);
+    labels.push({ ...tag, apt: a, pos: tagAnchor(a) });
   }
+  for (const t of [...labels, ...liftLabels]) [t.w, t.h] = [t.el.offsetWidth, t.el.offsetHeight];
 }
 const tmp = new THREE.Vector3();
 function project(v) {
@@ -272,22 +299,35 @@ function project(v) {
   return { x: ((tmp.x + 1) / 2) * innerWidth, y: ((1 - tmp.y) / 2) * innerHeight, behind: tmp.z > 1 };
 }
 function updateLabels() {
-  for (const { el, pos } of liftLabels) {
-    const p = project(pos);
-    el.style.display = p.behind ? 'none' : '';
-    el.style.left = `${p.x}px`;
-    el.style.top = `${p.y}px`;
+  // each tag stands right over its flat, a dot and a thin line down to it; where tags would cover
+  // one another, the farther one moves up (the nearer ones first, they are in front)
+  const list = [];
+  for (const t of [...labels, ...liftLabels]) {
+    const p = project(t.pos);
+    const hidden = p.behind || (t.apt && filterActive() && !matches(t.apt));
+    for (const el of [t.el, t.line, t.dot]) el.style.display = hidden ? 'none' : '';
+    if (!hidden) list.push({ t, p });
+    if (t.apt) t.el.classList.toggle('hover', t.apt === state.hoverApt);
   }
-  for (const { el, apt } of labels) {
-    const u = building.units.get(apt.id);
-    const tc = towerCentre(apt.tower);
-    const dx = u.center.x - tc.x, dz = u.center.z - tc.z, d = Math.hypot(dx, dz) || 1;
-    const p = project(new THREE.Vector3(u.center.x + (dx / d) * 7, u.top + 0.6, u.center.z + (dz / d) * 7));
-    const hidden = p.behind || (filterActive() && !matches(apt));
-    el.style.display = hidden ? 'none' : '';
-    el.style.left = `${p.x}px`;
-    el.style.top = `${p.y}px`;
-    el.classList.toggle('hover', apt === state.hoverApt);
+  list.sort((p, q) => q.p.y - p.p.y);
+  const placed = [];
+  for (const { t, p } of list) {
+    const w = t.w || 80, h = t.h || 34;
+    const x0 = p.x - w / 2;
+    let top = p.y - 14 - h;
+    for (let i = 0; i < 8; i++) {
+      const hit = placed.find((r) => x0 < r.x1 + 4 && x0 + w > r.x0 - 4 && top < r.y1 + 3 && top + h > r.y0 - 3);
+      if (!hit) break;
+      top = hit.y0 - 3 - h;
+    }
+    placed.push({ x0, x1: x0 + w, y0: top, y1: top + h });
+    t.el.style.left = `${x0}px`;
+    t.el.style.top = `${top}px`;
+    t.dot.style.left = `${p.x}px`;
+    t.dot.style.top = `${p.y}px`;
+    t.line.style.left = `${p.x}px`;
+    t.line.style.top = `${top + h}px`;
+    t.line.style.height = `${Math.max(0, p.y - top - h)}px`;
   }
 }
 
@@ -465,7 +505,7 @@ function renderSide() {
       <button class="back" data-act="floor">${T.backTo(T.floorN(a.floor))}</button>
       <h2>${T.flat(a.number)}</h2>
       <div class="sub">${T.block(a.letter)} · ${T.roomsN(a.rooms)} · ${T.floorN(a.floor)}</div>
-      <canvas class="plan"></canvas>
+      <div class="plan-wrap"><canvas class="plan" title="${T.planZoom}"></canvas><button class="plan-zoom" data-act="zoom" title="${T.planZoom}" aria-label="${T.planZoom}">⤢</button></div>
       <div class="area-big">${num(a.area)} <small>${T.m2}</small></div>
       <div class="specs">
         <div><span>${T.rooms}</span><b>${a.rooms}</b></div>
@@ -478,9 +518,43 @@ function renderSide() {
         <button class="btn primary" data-act="walk">${T.walk}</button>
         <button class="btn" data-act="request">${T.contact}</button>
       </div>`;
-    drawPlan(side.querySelector('.plan'), a);
+    const cv = side.querySelector('.plan');
+    cv.style.height = `${planHeight(a, cv.clientWidth)}px`;
+    drawPlan(cv, a);
+    cv.onclick = () => openPlan(a);
   }
 }
+// width / height of a flat's plan with its balconies
+function planAspect(a) {
+  const b = bounds([...a.data.outline, ...a.data.balconies.flatMap((q) => q.poly)]);
+  return (b.x1 - b.x0) / (b.y1 - b.y0);
+}
+// The card's plan as tall as the flat's shape asks for (a long narrow flat gets a tall plan), as far
+// as the screen leaves room for the rest of the card
+function planHeight(a, w) {
+  const want = (w - 28) / planAspect(a) + 28;
+  const most = innerWidth <= 760 ? 210 : 210 + Math.max(0, Math.min(150, innerHeight - 730));
+  return Math.round(Math.min(Math.max(want, 210), most));
+}
+// the plan full-screen, its rooms' names and areas in larger type
+function openPlan(a) {
+  const box = $('#plan-big');
+  box.querySelector('b').textContent = `${L().flat(a.number)} · ${num(a.area)} ${L().m2}`;
+  box.querySelector('button').textContent = `✕ ${L().close}`;
+  box.hidden = false;
+  const pad = 24, k = planAspect(a);
+  let w = Math.min(innerWidth - 68, 1100), h = (w - 2 * pad) / k + 2 * pad;
+  const most = innerHeight - 130;
+  if (h > most) [h, w] = [most, Math.min(w, (most - 2 * pad) * k + 2 * pad)];
+  const cv = box.querySelector('canvas');
+  cv.style.width = `${Math.round(w)}px`;
+  cv.style.height = `${Math.round(h)}px`;
+  drawPlan(cv, a, { pad, text: innerWidth <= 760 ? 1.15 : 1.45 });
+}
+const closePlan = () => ($('#plan-big').hidden = true);
+$('#plan-big').addEventListener('click', (e) => {
+  if (e.target === e.currentTarget || e.target.closest('[data-act="close"]')) closePlan();
+});
 $('#side').addEventListener('click', (e) => {
   const b = e.target.closest('button');
   if (!b) return;
@@ -488,6 +562,7 @@ $('#side').addEventListener('click', (e) => {
   else if (b.dataset.act === 'block') selectBlock(state.tower);
   else if (b.dataset.act === 'floor') selectFloor(state.tower, state.floor);
   else if (b.dataset.act === 'walk') enterWalk(state.apt);
+  else if (b.dataset.act === 'zoom') openPlan(state.apt);
   else if (b.dataset.act === 'request') toast(L().contactToast);
   else if (b.dataset.apt) selectApt(apartments.find((a) => a.id === b.dataset.apt));
   else if (b.dataset.place !== undefined) {
@@ -508,6 +583,7 @@ $('#side').addEventListener('pointerleave', () => setHover(null));
 function refresh() {
   renderFloors();
   renderSide();
+  if (!$('#plan-big').hidden) state.apt ? openPlan(state.apt) : closePlan();
   updateOverlays();
   const T = L();
   $('#hint').textContent = state.mode === 'overview' ? T.hintOverview : state.mode === 'block' ? T.hintBlock : T.hintFloor;
@@ -613,6 +689,7 @@ function enterWalk(a) {
     controls.enabled = false;
     camera.fov = 72;
     camera.near = 0.05;
+    frameCentre();
     pipeline.walk(true);
     lightInterior(walkInterior);
     camera.updateProjectionMatrix();
@@ -675,6 +752,8 @@ function exitWalk() {
     $('#walk-ui').hidden = true;
     document.body.classList.remove('walking');
     state.mode = 'block';
+    frameCentre();
+    camera.updateProjectionMatrix();
     selectFloor(a.tower, a.floor);
     selectApt(a);
     const v = aptView(a);
@@ -687,7 +766,8 @@ function exitWalk() {
 $('#exit-walk').onclick = exitWalk;
 addEventListener('keydown', (e) => {
   if (e.code === 'Escape') {
-    if (state.mode === 'walk') exitWalk();
+    if (!$('#plan-big').hidden) closePlan();
+    else if (state.mode === 'walk') exitWalk();
     else if (state.mode === 'floor' && state.apt) selectFloor(state.tower, state.floor);
     else if (state.mode === 'floor') selectBlock(state.tower);
     else if (state.mode === 'block') goOverview();
@@ -839,9 +919,25 @@ canvas.addEventListener('pointerup', (e) => {
   else selectFloor(a.tower, a.floor);
 });
 
+// The side panels cover the edges of a wide screen: the camera's centre moves into the free space
+// between them, so what it looks at (a block, the open floor) shows in the middle of what is seen
+// and the tags at its ends stay clear of the panels.
+function frameCentre() {
+  const W = innerWidth, H = innerHeight;
+  let dx = 0;
+  if (state.mode !== 'walk' && W > 760) {
+    const l = $('#floors').getBoundingClientRect().right, r = $('#side').getBoundingClientRect().left;
+    if (r - l > 240) dx = Math.round(W / 2 - (l + r) / 2);
+  }
+  if (dx) camera.setViewOffset(W, H, dx, 0, W, H);
+  else camera.clearViewOffset();
+}
+
 // ---------- loop ----------
 addEventListener('resize', () => {
+  if (!$('#plan-big').hidden && state.apt) openPlan(state.apt);
   camera.aspect = innerWidth / innerHeight;
+  frameCentre();
   camera.updateProjectionMatrix();
   pipeline.setSize(innerWidth, innerHeight);
 });
@@ -883,6 +979,8 @@ renderer.setAnimationLoop(() => {
 
 buildPlaces();
 refresh();
+frameCentre();
+camera.updateProjectionMatrix();
 const STILL = new URLSearchParams(location.search).has('still');
 lastInteraction = STILL ? Infinity : performance.now();
 

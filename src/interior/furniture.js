@@ -172,15 +172,17 @@ export function bed(k, M, w = 1.6, L = 2.12) {
   // throw across the foot
   k.rbox(M.throw, 0, 0.645, L - 0.32, w + 0.12, 0.03, 0.5, 0.014);
   for (const s of [-1, 1]) k.rbox(M.throw, s * (w / 2 + 0.06), 0.5, L - 0.32, 0.025, 0.3, 0.5, 0.01);
-  // pillows
-  const pw = single ? 0.66 : 0.68;
-  const xs = single ? [0] : [-w / 4 + 0.02, w / 4 - 0.02];
+  // pillows in rows, none through another: large ones standing against the headboard, the
+  // sleeping pillows lying in front of them, two small cushions standing in front of those
+  const pw = Math.min(single ? 0.66 : 0.68, single ? w - 0.1 : w / 2 - 0.06);
+  const xs = single ? [0] : [-w / 4, w / 4];
   for (const x of xs) {
-    k.rbox(M.bedding, x, 0.66, 0.3, pw, 0.17, 0.44, 0.08);
-    k.rbox(M.bedding, x, 0.75, 0.22, pw - 0.04, 0.38, 0.14, 0.07);
+    k.rbox(M.bedding, x, 0.8, 0.2, pw - 0.04, 0.4, 0.15, 0.07);
+    k.rbox(M.bedding, x, 0.655, 0.505, pw, 0.15, 0.4, 0.07);
   }
-  k.rbox(M.cushionC, single ? 0 : -0.18, 0.74, 0.42, 0.42, 0.34, 0.13, 0.06);
-  if (!single) k.rbox(M.cushionB, 0.22, 0.73, 0.44, 0.4, 0.32, 0.13, 0.06);
+  const cw = Math.min(0.4, (w - 0.2) / 2);
+  k.rbox(M.cushionC, single ? 0 : -cw / 2 - 0.02, 0.8, 0.79, cw, 0.3, 0.11, 0.05);
+  if (!single) k.rbox(M.cushionB, cw / 2 + 0.02, 0.8, 0.79, cw, 0.3, 0.11, 0.05);
 }
 
 /** returns the lamp's light position */

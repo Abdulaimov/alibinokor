@@ -64,6 +64,9 @@ const info = await page.evaluate(async ([id, walk]) => {
   cam.fov = 14;
   cam.updateProjectionMatrix();
   await new Promise((r) => setTimeout(r, 300));
+  // (no highlight over the flat: the furniture and the doors as they are)
+  for (const u of app.building.units.values()) for (const o of [u.overlay, u.ring, u.edges]) if (o) o.visible = false;
+  await new Promise((r) => setTimeout(r, 200));
   // plan points -> screen, at the height of the furniture
   cam.updateMatrixWorld(true);
   const pr = (x, y) => {

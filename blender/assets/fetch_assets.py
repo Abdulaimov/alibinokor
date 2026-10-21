@@ -42,6 +42,7 @@ ASSETS = {
     'fir_sapling_medium': ('model', ['1k'], None),         # conifers
     'pine_sapling_small': ('model', ['1k'], None),         # tall narrow trees
     'searsia_lucida': ('model', ['1k'], None),             # small ornamental trees / large shrubs
+    'island_tree_02': ('model', ['1k'], None),             # full-crowned broadleaf (atlas c)
 }
 
 

@@ -19,6 +19,7 @@ import { Q } from './quality.js';
 const SILL = 0.85;
 const HEAD = 0.35;
 const DOOR_H = 2.1;
+const CEIL = 0.02; // the ceiling hangs this far under the walls' tops (see the walk-through's ceiling)
 const HIGH = Q.level === 'high';
 
 const shape = (poly) => new THREE.Shape(poly.map(([x, y]) => new THREE.Vector2(x, y)));
@@ -188,6 +189,8 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
   const roomsAt = new PolyIndex();
   for (const apt of apts) for (const room of apt.data.rooms) roomsAt.add(room.poly, 'room', { apt, room });
   for (const c of plan.common ?? []) roomsAt.add(c, 'common', null);
+  const terraceAt = new PolyIndex();
+  for (const apt of apts) for (const b of apt.data.balconies) terraceAt.add(b.poly, 'terrace', { apt, room: b });
 
   // collision outlines (plan segments): walls, windows and glazing, then doors and furniture
   const segments = [];
@@ -219,9 +222,17 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
       group.add(m);
       floorMeshes.push(m);
     }
+    // balconies and terraces: a floor of their own (one can walk out onto them), a table and chairs
     for (const b of apt.data.balconies) {
-      k.world().add(M.balcony, flat(b.poly, 0.012));
-      balconyFurniture(k, M, b.poly);
+      const g = flat(b.poly, 0.012);
+      own.push(g);
+      const m = new THREE.Mesh(g, M.balcony);
+      m.receiveShadow = true;
+      m.userData = { apt, room: b };
+      group.add(m);
+      floorMeshes.push(m);
+      const t = balconyFurniture(k, M, b.poly);
+      if (t && walk === apt) addOutline([[t[0] - 0.36, t[1] - 0.36], [t[0] + 0.36, t[1] - 0.36], [t[0] + 0.36, t[1] + 0.36], [t[0] - 0.36, t[1] + 0.36]], 'table');
     }
   }
   for (const c of plan.common ?? []) k.world().add(M.corridor, flat(c, 0.004));
@@ -316,7 +327,10 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     return best;
   };
   const later = []; // leaves the drawing puts in the room on the other side, hung after all rooms
+  const leafPlans = []; // the leaves decided on (and their other hinge), built once all are in
   const entrances = []; // the doors into each flat: { apt, room, common, mid, n (into the room), s1 }
+  const pending = []; // openings in a room's outline that made no doorway: { apt, room, r }
+  const doorSpans = []; // the doorways made: { a, b, u, n, len } (the run of the room they were made from)
   // first pass: what is round each room, and a clear zone in front of every opening
   const zones = []; // { poly, mid }
   for (const apt of apts) {
@@ -340,6 +354,85 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
       }
     }
   }
+  // doors: door-wide gaps in the walls. Returns the wall's band [s0, s1] (along n) when a
+  // doorway was made. `band`: the band to use where the gap's ends find no wall
+  const doorway = (apt, room, r, band = null) => {
+    if (r.kind !== 'open' || r.len < 0.55 || r.len > 1.3) return null;
+    const fit = fitted.includes(apt);
+    // what is across the gap: a room of this flat, a loggia, the corridor, another flat
+    const mx0 = (r.a[0] + r.b[0]) / 2, my0 = (r.a[1] + r.b[1]) / 2;
+    let across = null, depth = null;
+    for (let d = 0.04; d <= 0.8; d += 0.02) {
+      const hit = roomsAt.at(mx0 - r.n[0] * d, my0 - r.n[1] * d) ?? terraceAt.at(mx0 - r.n[0] * d, my0 - r.n[1] * d);
+      if (hit) {
+        [across, depth] = [hit, d];
+        break;
+      }
+    }
+    if (!across) return null; // nothing across: a hole to the outside, closed later
+    if (across.kind === 'room' && across.data.apt !== apt) return null; // into another flat: walled up later
+    const glazed = across.kind === 'terrace' || (across.kind === 'room' && ['loggia', 'terrace'].includes(across.data.room.kind)) ||
+      ['loggia', 'terrace'].includes(room.kind);
+    // the slot through the wall: where the wall ends beside the gap, across its thickness
+    // (s along n, 0 = this run; the outline may run along the wall face or inside the gap).
+    // The wall beside it is looked for up to 20 cm on: door frames are drawn wider than the gap;
+    // beside a balcony door the window counts as wall
+    const solidKind = (q) => {
+      const k = solid.at(q[0], q[1])?.kind;
+      return k === 'wall' || (glazed && (k === 'window' || k === 'glass'));
+    };
+    const side = (p, sgn, s) => [0.05, 0.1, 0.15, 0.2].some((e) => solidKind([p[0] - r.u[0] * e * sgn + r.n[0] * s, p[1] - r.u[1] * e * sgn + r.n[1] * s]));
+    const scan = (test) => {
+      let s0 = null, s1 = null;
+      for (let s = -0.7; s <= 0.3; s += 0.01) {
+        if (test(s)) {
+          if (s0 === null) s0 = s;
+          s1 = s;
+        } else if (s0 !== null && s1 > -0.02) break;
+        else if (s0 !== null) s0 = s1 = null;
+      }
+      return s0 !== null && s1 - s0 >= 0.05 ? [s0, s1] : null;
+    };
+    // wall on both sides; else (a door in a corner) on one side; else the band given; else the
+    // gap between this room and the one across
+    let got = scan((s) => side(r.a, 1, s) && side(r.b, -1, s)) ?? scan((s) => side(r.a, 1, s) || side(r.b, -1, s)) ?? band;
+    if (!got && depth > 0.06) got = [-depth + 0.02, 0];
+    if (!got) return null;
+    let [s0, s1] = got;
+    s0 -= 0.005;
+    s1 += 0.005;
+    const mx = mx0, my = my0, sm = (s0 + s1) / 2;
+    const behind = roomsAt.at(mx + r.n[0] * (s0 - 0.15), my + r.n[1] * (s0 - 0.15)) ?? across;
+    const entrance = !behind || behind.kind === 'common' || (behind.kind === 'room' && behind.data.apt !== apt);
+    const centre = [mx + r.n[0] * sm, my + r.n[1] * sm];
+    if (entrance) entrances.push({ apt, room, common: !behind || behind.kind === 'common', mid: [mx, my], n: r.n, s1 });
+    const shift = (p, s) => [p[0] + r.n[0] * s, p[1] + r.n[1] * s];
+    const face = { ...r, a: shift(r.a, s1), b: shift(r.b, s1) };
+    doorSpans.push({ a: r.a, b: r.b, u: r.u, n: r.n, len: r.len, apt: apt.id, room: room.kind, across: across.kind === 'room' ? across.data.room.kind : across.kind, entrance, band: [s0, s1],
+      rooms: [room, across.kind === 'room' ? across.data.room : null], aptObj: apt });
+    // casing on this side of the wall
+    casing(k, entrance ? M.entrance : glazed ? M.frame : M.skirting, face);
+    // the same doorway seen from the room on its other side: the wall over it once, the leaf
+    // in whichever room it fits first
+    const seen = (list) => list.some((c) => dist(c, centre) < 0.45);
+    if (!seen(doors)) {
+      doors.push(centre);
+      // (2 cm into the walls on either side: no hairline at its ends)
+      slab(k, M.wall, shift(r.a, s0), shift(r.b, s0), r.n, 0, s1 - s0, DOOR_H, H, 0.02);
+    }
+    if (seen(leaves)) return [s0, s1];
+    // the leaf, open 90 degrees into this room, hinged at the end nearer a corner; the drawing
+    // opens this door into the room on the other side: the leaf goes there (or back here, once
+    // every room is done, if it does not fit there)
+    const otherRoom = across.kind === 'room' ? across.data.room : null;
+    const drawn = swingAt(centre);
+    if (drawn && (drawn[2] - drawn[0]) * r.n[0] + (drawn[3] - drawn[1]) * r.n[1] < 0 && across.kind === 'room') {
+      later.push({ centre, hang: () => hang(room, r, face, centre, entrance, s0, s1, fit, glazed, otherRoom) });
+      return [s0, s1];
+    }
+    hang(room, r, face, centre, entrance, s0, s1, fit, glazed, otherRoom);
+    return [s0, s1];
+  };
   for (const apt of apts) {
     const fit = fitted.includes(apt);
     for (const room of [...apt.data.rooms].sort((p, q) => order(p) - order(q))) {
@@ -351,120 +444,210 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
           if (room._wet && r.kind === 'window') slab(k, M.tileWall, r.a, r.b, r.n, r.face, 0.008, H - HEAD, H);
         }
       }
-      // doors: door-wide gaps with wall on both sides. Returns the wall's band [s0, s1] (along n)
-      // when a doorway was made. `band`: the band to use where the gap's ends find no wall
-      const doorway = (r, band = null) => {
-        if (r.kind !== 'open' || r.len < 0.55 || r.len > 1.3) return null;
-        // the slot through the wall: where the wall ends beside the gap, across its thickness
-        // (s along n, 0 = this run; the outline may run along the wall face or inside the gap)
-        // (the door into a flat may stand in an opening a little wider than the hall's gap: the wall
-        // beside it is looked for up to 20 cm on, where the corridor is across)
-        const mx0 = (r.a[0] + r.b[0]) / 2, my0 = (r.a[1] + r.b[1]) / 2;
-        const across = roomsAt.at(mx0 - r.n[0] * 0.5, my0 - r.n[1] * 0.5) ?? roomsAt.at(mx0 - r.n[0] * 0.7, my0 - r.n[1] * 0.7);
-        const reachOn = across?.kind === 'common' ? [0.05, 0.1, 0.15, 0.2] : [0.05];
-        const side = (p, sgn, s) => reachOn.some((e) => solid.at(p[0] - r.u[0] * e * sgn + r.n[0] * s, p[1] - r.u[1] * e * sgn + r.n[1] * s)?.kind === 'wall');
-        const inWall = (s) => side(r.a, 1, s) && side(r.b, -1, s);
-        let s0 = null, s1 = null;
-        for (let s = -0.6; s <= 0.3; s += 0.01) {
-          if (inWall(s)) {
-            if (s0 === null) s0 = s;
-            s1 = s;
-          } else if (s0 !== null && s1 > -0.02) break;
-          else if (s0 !== null) s0 = s1 = null;
-        }
-        if ((s0 === null || s1 - s0 < 0.05) && reachOn.length > 1) {
-          // the door into a flat in a corner of the corridor: the flat's wall on one side only
-          s0 = s1 = null;
-          for (let s = -0.6; s <= 0.3; s += 0.01) {
-            if (side(r.a, 1, s) || side(r.b, -1, s)) {
-              if (s0 === null) s0 = s;
-              s1 = s;
-            } else if (s0 !== null && s1 > -0.02) break;
-            else if (s0 !== null) s0 = s1 = null;
-          }
-        }
-        if ((s0 === null || s1 - s0 < 0.05) && band) [s0, s1] = band;
-        if (s0 === null || s1 - s0 < 0.05) return null; // no wall beside the gap: an open plan
-        s0 -= 0.005;
-        s1 += 0.005;
-        const mx = (r.a[0] + r.b[0]) / 2, my = (r.a[1] + r.b[1]) / 2, sm = (s0 + s1) / 2;
-        const behind = roomsAt.at(mx + r.n[0] * (s0 - 0.15), my + r.n[1] * (s0 - 0.15));
-        const entrance = !behind || behind.kind === 'common' || behind.data.apt !== apt;
-        const centre = [mx + r.n[0] * sm, my + r.n[1] * sm];
-        if (entrance) entrances.push({ apt, room, common: !behind || behind.kind === 'common', mid: [mx, my], n: r.n, s1 });
-        const shift = (p, s) => [p[0] + r.n[0] * s, p[1] + r.n[1] * s];
-        const face = { ...r, a: shift(r.a, s1), b: shift(r.b, s1) };
-        // casing on this side of the wall
-        casing(k, entrance ? M.entrance : M.skirting, face);
-        // the same doorway seen from the room on its other side: the wall over it once, the leaf
-        // in whichever room it fits first
-        const seen = (list) => list.some((c) => dist(c, centre) < 0.45);
-        if (!seen(doors)) {
-          doors.push(centre);
-          slab(k, M.wall, shift(r.a, s0), shift(r.b, s0), r.n, 0, s1 - s0, DOOR_H, H);
-        }
-        if (seen(leaves)) return [s0, s1];
-        // the leaf, open 90 degrees into this room, hinged at the end nearer a corner
-        // a leaf only in door-sized openings (wider ones are passages without a door)
-        if (r.len > 1.15 || s1 - s0 > 0.45) return [s0, s1];
-        // the drawing opens this door into the room on the other side: the leaf goes there (or back
-        // here, once every room is done, if it does not fit there)
-        const drawn = swingAt(centre);
-        if (drawn && (drawn[2] - drawn[0]) * r.n[0] + (drawn[3] - drawn[1]) * r.n[1] < 0) {
-          later.push({ centre, hang: () => hang(room, r, face, centre, entrance, s0, s1, fit) });
-          return [s0, s1];
-        }
-        hang(room, r, face, centre, entrance, s0, s1, fit);
-        return [s0, s1];
-      };
       for (const r of runs) {
         if (r.kind !== 'open') continue;
         if (r.len <= 1.3) {
-          doorway(r);
+          if (!doorway(apt, room, r)) pending.push({ apt, room, r });
           continue;
         }
-        // a stretch of the flat's wall to the corridor that the drawing leaves unfilled beside the
-        // entrance door (a 2 m gap): the door where its swing is drawn, the rest walled up
-        const mx0 = (r.a[0] + r.b[0]) / 2, my0 = (r.a[1] + r.b[1]) / 2;
-        if (roomsAt.at(mx0 - r.n[0] * 0.5, my0 - r.n[1] * 0.5)?.kind !== 'common') continue;
-        const sw = (plan.swings ?? []).find((q) => {
-          const t = (q[0] - r.a[0]) * r.u[0] + (q[1] - r.a[1]) * r.u[1], d = (q[0] - r.a[0]) * r.n[0] + (q[1] - r.a[1]) * r.n[1];
-          return t > 0.3 && t < r.len - 0.3 && Math.abs(d) < 0.5;
-        });
-        if (!sw) continue;
-        const tc = (sw[0] - r.a[0]) * r.u[0] + (sw[1] - r.a[1]) * r.u[1];
-        const t0 = Math.max(0, tc - 0.48), t1 = Math.min(r.len, tc + 0.48);
-        const P = (t) => [r.a[0] + r.u[0] * t, r.a[1] + r.u[1] * t];
-        // the wall's band, from the walls at the ends of the stretch
-        let band = null;
-        for (const [p, sg] of [[r.a, -1], [r.b, 1]]) {
-          let b0 = null, b1 = null;
-          for (let s = -0.6; s <= 0.3; s += 0.01) {
-            const q = [p[0] + r.u[0] * sg * 0.1 + r.n[0] * s, p[1] + r.u[1] * sg * 0.1 + r.n[1] * s];
-            if (solid.at(...q)?.kind === 'wall') {
-              if (b0 === null) b0 = s;
-              b1 = s;
-            } else if (b0 !== null) break;
-          }
-          if (b0 !== null && b1 - b0 >= 0.05) band = [b0, b1];
-        }
-        const got = doorway({ ...r, a: P(t0), b: P(t1), len: t1 - t0 }, band);
-        if (!got) continue;
-        const [s0, s1] = got;
-        for (const [u0, u1] of [[0, t0], [t1, r.len]]) {
-          if (u1 - u0 < 0.03) continue;
-          const A = P(u0), B = P(u1), sh = (q, s) => [q[0] + r.n[0] * s, q[1] + r.n[1] * s];
-          slab(k, M.wall, sh(A, s0), sh(B, s0), r.n, 0, s1 - s0, 0, H);
-          slab(k, M.skirting, sh(A, s1), sh(B, s1), r.n, 0, 0.014, 0, 0.08);
-          addOutline([sh(A, s0), sh(B, s0), sh(B, s1), sh(A, s1)]);
-        }
+        // (wider: an open plan, or a doorway in a wall the drawing leaves unfilled: see below)
+        pending.push({ apt, room, r });
       }
     }
   }
-  for (const d of later) if (!leaves.some((c) => dist(c, d.centre) < 0.45)) d.hang();
 
-  // the leaf of a doorway, open 90 degrees into `room`, hinged at the end nearer a corner
-  function hang(room, r, face, centre, entrance, s0, s1, fit) {
+  // ---- the openings that are no doorway: closed the way the drawing means them ----
+  // The sheets draw every room closed by walls, some of them as thin lines the extraction does not
+  // read: a slit between walls, a stretch with nothing across (a hole to the outside), an opening
+  // into another flat or the corridor, a wide opening between two rooms - walled up, with the
+  // doors the drawing has in them (and a door wherever a room would else have no way in). A hole
+  // to the outside of a room: glazed to the ceiling (the corner bays, French windows); towards a
+  // loggia or terrace: glazed, with a glass door; the open edge of a loggia: a parapet.
+  const OUTDOOR = new Set(['loggia', 'terrace']);
+  const gaps = []; // for the checks: { apt, room, r, across, other, depth, done }
+  const fillers = []; // plan polygons of what was put into the openings (each opening once)
+  const along = (r, t) => [r.a[0] + r.u[0] * t, r.a[1] + r.u[1] * t];
+  const out = (q, r, s) => [q[0] - r.n[0] * s, q[1] - r.n[1] * s];
+  const filled = (r, t0, t1, thick) => fillers.some((f) => inside(f, ...out(along(r, (t0 + t1) / 2), r, thick / 2)));
+  const piece = (r, t0, t1, thick) => {
+    const A = along(r, t0 - 0.015), B = along(r, t1 + 0.015);
+    return { A, B, poly: [A, B, out(B, r, thick), out(A, r, thick)] };
+  };
+  const wallUp = (room, r, t0, t1, thick) => {
+    if (filled(r, t0, t1, thick)) return;
+    const { A, B, poly } = piece(r, t0, t1, thick);
+    fillers.push(poly);
+    // (5 mm into the room: no hairline left where the wall meets the floor and the next wall)
+    slab(k, M.wall, A, B, r.n, -thick, thick + 0.005, 0, H);
+    if (room._wet) slab(k, M.tileWall, A, B, r.n, 0, 0.008, 0, H);
+    else slab(k, M.skirting, A, B, r.n, 0, 0.014, 0, 0.08);
+    addOutline(poly);
+  };
+  const glazeUp = (room, r, t0, t1, thick) => {
+    if (filled(r, t0, t1, thick)) return;
+    const { A, B, poly } = piece(r, t0, t1, thick);
+    fillers.push(poly);
+    const mid = -thick / 2;
+    slab(k, M.glass, A, B, r.n, mid - 0.005, 0.01, 0, H);
+    slab(k, M.frame, A, B, r.n, mid - 0.035, 0.07, 0, 0.09);
+    slab(k, M.frame, A, B, r.n, mid - 0.035, 0.07, H - 0.07, H);
+    const L = dist(A, B), u = r.u;
+    const posts = Math.max(1, Math.round(L / 1.2));
+    for (let i = 0; i <= posts; i++) {
+      const t = (L * i) / posts, c = [A[0] + u[0] * t, A[1] + u[1] * t];
+      slab(k, M.frame, [c[0] - u[0] * 0.03, c[1] - u[1] * 0.03], [c[0] + u[0] * 0.03, c[1] + u[1] * 0.03], r.n, mid - 0.04, 0.08, 0, H);
+    }
+    if (thick > 0.12) {
+      // the reveal round it: wall above nothing, a sill board at the floor
+      slab(k, M.sill, A, B, r.n, mid + 0.035, Math.min(0.05, -mid - 0.035), 0, 0.02);
+    }
+    addOutline(poly);
+  };
+  const parapet = (room, r, t0, t1) => {
+    if (filled(r, t0, t1, 0.12)) return;
+    const { A, B, poly } = piece(r, t0, t1, 0.12);
+    fillers.push(poly);
+    slab(k, M.wall, A, B, r.n, -0.12, 0.125, 0, 1.0);
+    slab(k, M.sill, A, B, r.n, -0.14, 0.16, 1.0, 1.04);
+    addOutline(poly);
+  };
+  // what is across each opening, and the stretches of it that no doorway covers (a doorway made
+  // from the other side, or a door of a wide opening)
+  const items = pending.map(({ apt, room, r }) => {
+    const L = r.len, mid = along(r, L / 2);
+    let across = 'outside', other = null, depth = null;
+    for (let d = 0.04; d <= 0.8; d += 0.02) {
+      const q = out(mid, r, d);
+      const hit = roomsAt.at(...q);
+      if (hit) {
+        across = hit.kind === 'common' ? 'common' : hit.data.apt === apt ? 'same' : 'other';
+        other = hit.kind === 'common' ? null : hit.data.room;
+        depth = d;
+        break;
+      }
+      const ter = terraceAt.at(...q);
+      if (ter) {
+        [across, other, depth] = ['terrace', ter.data.room, d];
+        break;
+      }
+      if (solid.at(...q)) {
+        [across, depth] = ['solid', d];
+        break;
+      }
+    }
+    return { apt, room, r, L, mid, across, other, depth, thick: depth ? Math.min(0.7, Math.max(0.04, depth)) : 0.25 };
+  });
+  const freeOf = (it) => {
+    const { r, L } = it;
+    let free = [[0, L]];
+    for (const ds of doorSpans) {
+      if (Math.abs(ds.u[0] * r.u[0] + ds.u[1] * r.u[1]) < 0.95) continue;
+      const ta = (ds.a[0] - r.a[0]) * r.u[0] + (ds.a[1] - r.a[1]) * r.u[1], tb = (ds.b[0] - r.a[0]) * r.u[0] + (ds.b[1] - r.a[1]) * r.u[1];
+      const da = (ds.a[0] - r.a[0]) * r.n[0] + (ds.a[1] - r.a[1]) * r.n[1];
+      if (Math.abs(da) > 0.9) continue;
+      const [c0, c1] = [Math.min(ta, tb) - 0.03, Math.max(ta, tb) + 0.03];
+      free = free.flatMap(([f0, f1]) => (c1 <= f0 || c0 >= f1 ? [[f0, f1]] : [[f0, Math.max(f0, c0)], [Math.min(f1, c1), f1]].filter(([x0, x1]) => x1 - x0 > 0.015)));
+    }
+    return free;
+  };
+  // a door in a stretch of an opening, centred at t (the drawing's door width, about 0.9 m)
+  const doorIn = (it, tc, w) => {
+    const { apt, room, r, L, thick } = it;
+    const t0 = Math.max(0, tc - w / 2), t1 = Math.min(L, tc + w / 2);
+    return t1 - t0 >= 0.55 && doorway(apt, room, { ...r, a: along(r, t0), b: along(r, t1), len: t1 - t0 }, [-thick + 0.02, 0]);
+  };
+  // 1. the doors the drawing has in wide openings (between rooms, or the entrance in a stretch
+  //    of wall the drawing leaves unfilled)
+  for (const it of items) {
+    if (it.across !== 'same' && it.across !== 'common') continue;
+    for (const q of plan.swings ?? []) {
+      const { r } = it;
+      const t = (q[0] - r.a[0]) * r.u[0] + (q[1] - r.a[1]) * r.u[1], d = (q[0] - r.a[0]) * r.n[0] + (q[1] - r.a[1]) * r.n[1];
+      if (Math.abs(d) > 0.7 || t < -0.2 || t > it.L + 0.2) continue;
+      const f = freeOf(it).find(([f0, f1]) => t > f0 - 0.2 && t < f1 + 0.2 && f1 - f0 >= 0.55);
+      if (f) doorIn(it, Math.min(Math.max(t, f[0] + 0.45), f[1] - 0.45), it.across === 'common' ? 0.96 : 0.9);
+    }
+  }
+  // 2. every room of a flat can be walked into: where a room has no doorway to the rest of its
+  //    flat, a door in the longest stretch of opening between them
+  for (const apt of apts) {
+    // (the small service loggias, up to 2.6 m2, are closed off on the drawings: no door needed)
+    const rooms = apt.data.rooms.filter((rm) => !OUTDOOR.has(rm.kind) || rm.area > 2.6);
+    for (let round = 0; round < 6; round++) {
+      const reached = new Set(doorSpans.filter((d) => d.aptObj === apt && d.entrance).map((d) => d.rooms[0]));
+      if (!reached.size) break;
+      let grew = true;
+      while (grew) {
+        grew = false;
+        for (const d of doorSpans) {
+          if (d.aptObj !== apt || !d.rooms[1]) continue;
+          const [p, q] = d.rooms;
+          // (no way on through a small service loggia: it is closed off)
+          const through = (x) => !(OUTDOOR.has(x.kind) && x.area <= 2.6);
+          if (reached.has(p) !== reached.has(q) && through(reached.has(p) ? p : q)) {
+            reached.add(p);
+            reached.add(q);
+            grew = true;
+          }
+        }
+      }
+      const lost = rooms.filter((rm) => !reached.has(rm));
+      if (!lost.length) break;
+      let made = false;
+      for (const rm of lost) {
+        const cands = items.filter((it) => it.apt === apt && it.across === 'same' &&
+          ((it.room === rm && reached.has(it.other)) || (it.other === rm && reached.has(it.room))))
+          .flatMap((it) => freeOf(it).map((f) => ({ it, f })))
+          .filter(({ f }) => f[1] - f[0] >= 0.75)
+          .sort((p, q) => (q.f[1] - q.f[0]) - (p.f[1] - p.f[0]));
+        if (cands.length && doorIn(cands[0].it, (cands[0].f[0] + cands[0].f[1]) / 2, 0.9)) made = true;
+      }
+      if (!made) break;
+    }
+  }
+  // 2b. a way out onto every terrace (on the top floors of blocks Б and Г the terraces lie behind
+  //     glass walls the drawing gives no door in): a glazed door in the longest opening towards
+  //     the terrace, from the living room if it has one
+  for (const apt of apts) {
+    for (const b of apt.data.balconies) {
+      if (b.area < 3) continue;
+      const mid = (d) => [(d.a[0] + d.b[0]) / 2, (d.a[1] + d.b[1]) / 2];
+      // (a door from a room: the service loggia's door onto the terrace is no way out to it)
+      if (doorSpans.some((d) => d.aptObj === apt && d.across === 'terrace' && !OUTDOOR.has(d.room) && distToPolygon(b.poly, ...mid(d)) < 0.8)) continue;
+      const cands = items.filter((it) => it.apt === apt && it.across === 'terrace' && it.other === b && !OUTDOOR.has(it.room.kind))
+        .flatMap((it) => freeOf(it).map((f) => ({ it, f, len: f[1] - f[0] + (it.room.kind === 'living' ? 10 : 0) })))
+        .filter(({ f }) => f[1] - f[0] >= 0.9)
+        .sort((p, q) => q.len - p.len);
+      if (cands.length) doorIn(cands[0].it, (cands[0].f[0] + cands[0].f[1]) / 2, 0.9);
+    }
+  }
+  // 3. the rest closed: walls, glazing towards the outside and the loggias, parapets
+  for (const it of items) {
+    const { apt, room, r, across, other, depth, thick } = it;
+    const free = freeOf(it);
+    let done;
+    const k1 = room.kind, k2 = other?.kind;
+    if (!free.length) done = 'doorways';
+    else if (OUTDOOR.has(k1) && (across === 'outside' || across === 'terrace')) {
+      for (const [t0, t1] of free) parapet(room, r, t0, t1);
+      done = 'parapet';
+    } else {
+      const glassy = across === 'outside' || across === 'terrace' || (across === 'same' && (OUTDOOR.has(k2) || OUTDOOR.has(k1)));
+      for (const [t0, t1] of free) {
+        if (glassy && t1 - t0 >= 0.55) glazeUp(room, r, t0, t1, across === 'outside' ? 0.12 : thick);
+        else wallUp(room, r, t0, t1, thick);
+      }
+      done = glassy ? 'glazed' : 'walled';
+    }
+    gaps.push({ apt, room, r, across, other, depth, done });
+  }
+  for (const d of later) if (!leaves.some((c) => dist(c, d.centre) < 0.45)) d.hang();
+  settleLeaves();
+  for (const L of leafPlans) buildLeaf(L);
+
+  // the leaf of a doorway, open 90 degrees into `room`, hinged at the end nearer a corner (both
+  // hinges that fit are kept: settleLeaves may turn it round)
+  function hang(room, r, face, centre, entrance, s0, s1, fit, glazed = false, other = null) {
     const leafW = r.len - 0.03;
     // hinge on the side with the shorter stretch of wall to the next corner, so the open leaf
     // stands near that corner; the open leaf has to stand inside the room
@@ -474,29 +657,75 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
       return d;
     };
     const ends = reach(r.a, 1) <= reach(r.b, -1) ? [true, false] : [false, true];
-    let h = null, w = null, tip = null;
-    for (const atA of ends) {
-      const hh = atA ? face.a : face.b, ww = atA ? r.u : [-r.u[0], -r.u[1]];
-      const tt = [hh[0] + r.n[0] * leafW, hh[1] + r.n[1] * leafW];
-      // ...and leave room to walk round its edge (not across a narrow hall)
-      // ...and not swing into the way to another doorway
-      const P = (f) => [hh[0] + r.n[0] * leafW * f + ww[0] * 0.03, hh[1] + r.n[1] * leafW * f + ww[1] * 0.03];
-      const ok = [0.5, 1, 1 + 0.75 / leafW].every((f) => inside(room.poly, ...P(f))) &&
-        !zones.some((z) => dist(z.mid, centre) > 0.6 && [0.15, 0.5, 0.85, 1].some((f) => inside(z.poly, ...P(f))));
-      if (ok) {
-        [h, w, tip] = [hh, ww, tt];
-        break;
+    const options = [];
+    // (into this room first; then, for settleLeaves, into the room across, from the far face)
+    const sides = [[room, face, r.n]];
+    if (other) sides.push([other, { a: [r.a[0] + r.n[0] * s0, r.a[1] + r.n[1] * s0], b: [r.b[0] + r.n[0] * s0, r.b[1] + r.n[1] * s0] }, [-r.n[0], -r.n[1]]]);
+    for (const [into, fc, n] of sides) {
+      for (const atA of ends) {
+        const hh = atA ? fc.a : fc.b, ww = atA ? r.u : [-r.u[0], -r.u[1]];
+        const tt = [hh[0] + n[0] * leafW, hh[1] + n[1] * leafW];
+        // ...and leave room to walk round its edge (not across a narrow hall)
+        // ...and not swing into the way to another doorway
+        const P = (f) => [hh[0] + n[0] * leafW * f + ww[0] * 0.03, hh[1] + n[1] * leafW * f + ww[1] * 0.03];
+        const ok = [0.5, 1, 1 + 0.75 / leafW].every((f) => inside(into.poly, ...P(f))) &&
+          !zones.some((z) => dist(z.mid, centre) > 0.6 && [0.15, 0.5, 0.85, 1].some((f) => inside(z.poly, ...P(f))));
+        if (ok) options.push({ h: hh, w: ww, tip: tt, room: into, n });
       }
     }
-    if (!h) return;
+    if (!options.length) return;
     leaves.push(centre);
-    if (fit || !walk) doorLeaf(k, M, h, tip, w, entrance);
+    leafPlans.push({ r, entrance, glazed, fit, leafW, options, pick: 0 });
+  }
+  // Two doors in a small hall, both open: their leaves can meet and shut the hall off from one of
+  // the rooms (no way between them). Where two leaves of a flat stand closer than a person's width,
+  // the flat's rooms are walked to from its entrance, and the leaves there hinged the other way
+  // round until every room reachable with no leaves at all is reachable with them.
+  function settleLeaves() {
+    const seg = (L) => { const o = L.options[L.pick]; return [o.h[0], o.h[1], o.tip[0], o.tip[1]]; };
+    const gap = (A, B) => {
+      const [a, b] = [seg(A), seg(B)];
+      return Math.min(distToSegment(a[0], a[1], b[0], b[1], b[2], b[3]).d, distToSegment(a[2], a[3], b[0], b[1], b[2], b[3]).d,
+        distToSegment(b[0], b[1], a[0], a[1], a[2], a[3]).d, distToSegment(b[2], b[3], a[0], a[1], a[2], a[3]).d);
+    };
+    for (const apt of apts) {
+      const mine = leafPlans.filter((L) => L.options.some((o) => apt.data.rooms.includes(o.room)));
+      const tight = mine.filter((A) => mine.some((B) => B !== A && gap(A, B) < 0.5));
+      if (!tight.length) continue;
+      const door = entranceOf(entrances, apt);
+      const start = door?.inside ?? interiorPoint(entranceHall(apt).poly);
+      const all = () => [...segments, ...mine.map(seg)];
+      const most = reachableRooms(apt, segments, start).size;
+      if (reachableRooms(apt, all(), start).size >= most) continue;
+      // the hinges (and sides) that let the most of the flat be walked: rooms first, then floor
+      // (a room may be reached at its doorway and no further)
+      const score = () => reachableRooms(apt, all(), start).size * 1e6 + reachableRooms(apt, all(), start, true);
+      let now = score();
+      for (let round = 0; round < 3 && now < most * 1e6; round++) {
+        for (const L of tight) {
+          const was = L.pick;
+          let best = now, pick = was;
+          for (let i = 0; i < L.options.length; i++) {
+            if (i === was) continue;
+            L.pick = i;
+            const n = score();
+            if (n > best) [best, pick] = [n, i];
+          }
+          L.pick = pick;
+          now = best;
+        }
+      }
+    }
+  }
+  function buildLeaf({ r, entrance, glazed, fit, leafW, options, pick }) {
+    const { h, w, tip, room, n } = options[pick];
+    if (fit || !walk) doorLeaf(k, M, h, tip, w, entrance, glazed);
     segments.push([h[0], h[1], tip[0], tip[1]]);
     obstacles.push({ what: 'door', poly: [h, tip] });
     const sx = w[0] * leafW, sy = w[1] * leafW;
     keepout.push(way([h, tip, [tip[0] + sx, tip[1] + sy], [h[0] + sx, h[1] + sy]], room));
     // and a way round the open leaf's edge (furniture right at its tip would shut the room off)
-    const far = [h[0] + r.n[0] * (leafW + 0.7), h[1] + r.n[1] * (leafW + 0.7)];
+    const far = [h[0] + n[0] * (leafW + 0.7), h[1] + n[1] * (leafW + 0.7)];
     keepout.push(way([tip, far, [far[0] + sx, far[1] + sy], [tip[0] + sx, tip[1] + sy]], room));
     keepout.push(way([tip, far, [far[0] - w[0] * 0.65, far[1] - w[1] * 0.65], [tip[0] - w[0] * 0.65, tip[1] - w[1] * 0.65]], room));
   }
@@ -599,10 +828,19 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
   const lightObjects = [];
   if (walk) {
     outline = walk.data.outline;
-    const ceil = flat(plan.enclosure, H);
+    // (2 cm under the clear height: in tower A the slab of the floor above starts right there, and
+    // its dark underside showed through the ceiling)
+    const ceil = flat(plan.enclosure, H - CEIL);
     own.push(ceil);
     const c = new THREE.Mesh(ceil, M.ceiling);
     group.add(c);
+    // and a floor under the whole level, a few millimetres below the rooms' own: the rooms' outlines,
+    // traced inside the walls, stop short of the door openings, where the grey slab showed through
+    const under = flat(plan.enclosure, 0.003);
+    own.push(under);
+    const u = new THREE.Mesh(under, M.floorUnder);
+    u.receiveShadow = true;
+    group.add(u);
     // one light per room, the biggest rooms first; shadows keep each room's light in the room
     const budget = HIGH ? 6 : 3, shadowed = HIGH ? 4 : 0;
     const byRoom = new Map();
@@ -686,6 +924,9 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     doors: doors.length,
     liftTags, // { x, y, z (scene), q: [kg, ...] }: one per lift hall, for the floor view's tags
     reach, // walk-through: rooms reachable before furniture and from the start after it (for the checks)
+    doorways: doorSpans.map((d) => ({ apt: d.apt, room: d.room, across: d.across, entrance: d.entrance, len: +d.len.toFixed(2), a: d.a.map((v) => +v.toFixed(2)), band: d.band.map((v) => +v.toFixed(2)) })),
+    entrances: entrances.map((e) => ({ apt: e.apt.id, room: e.room.kind, common: e.common, mid: e.mid.map((v) => +v.toFixed(2)) })),
+    gaps: gaps.map((g) => ({ apt: g.apt.id, room: `${g.room.kind} ${g.room.area}`, other: g.other ? `${g.other.kind} ${g.other.area}` : null, across: g.across, done: g.done, len: +g.r.len.toFixed(2), depth: g.depth && +g.depth.toFixed(2), a: g.r.a.map((v) => +v.toFixed(2)), b: g.r.b.map((v) => +v.toFixed(2)) })),
     // Move from (x, z) to (nx, nz) in the scene without walking through walls or out of the flat.
     move(x, z, nx, nz) {
       const p = frame.toPlan(nx, nz);
@@ -701,7 +942,7 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
           }
         }
       }
-      if (outline && !inside(outline, px, py)) return { x, z };
+      if (outline && !onFoot(walk, px, py)) return { x, z };
       const s = frame.toScene(px, py);
       return { x: s.x, z: s.z };
     },
@@ -723,12 +964,24 @@ function entranceHall(apt) {
  * Rooms of a flat reachable on foot from `start`: a 10 cm grid over the flat, cells closer than
  * 22 cm to a collision line blocked (the visitor keeps 25 cm), flood-filled from the start.
  */
-function reachableRooms(apt, segments, start) {
-  const out = apt.data.outline, b = bbox(out), step = 0.1, R = 0.23; // a little more than the walker (0.2 m): furniture always leaves a way the visitor fits through
+/** where one can stand in a flat: in its outline or out on its balconies and terraces (and in the
+ *  doorway between, where the two outlines stop at the faces of the wall) */
+function onFoot(apt, x, y) {
+  if (inside(apt.data.outline, x, y)) return true;
+  for (const b of apt.data.balconies) {
+    if (inside(b.poly, x, y)) return true;
+    if (distToPolygon(b.poly, x, y) < 0.4 && distToPolygon(apt.data.outline, x, y) < 0.4) return true;
+  }
+  return false;
+}
+
+function reachableRooms(apt, segments, start, cells = false) {
+  // (the balconies and terraces too: a room may be reached across one)
+  const out = [...apt.data.outline, ...apt.data.balconies.flatMap((q) => q.poly)], b = bbox(out), step = 0.1, R = 0.23; // a little more than the walker (0.2 m): furniture always leaves a way the visitor fits through
   const nx = Math.ceil((b.x1 - b.x0) / step) + 1, ny = Math.ceil((b.y1 - b.y0) / step) + 1;
   const blocked = new Uint8Array(nx * ny);
   const cx = (i) => b.x0 + i * step, cy = (j) => b.y0 + j * step;
-  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (!inside(out, cx(i), cy(j))) blocked[j * nx + i] = 1;
+  for (let j = 0; j < ny; j++) for (let i = 0; i < nx; i++) if (!onFoot(apt, cx(i), cy(j))) blocked[j * nx + i] = 1;
   for (const [ax, ay, bx, by] of segments) {
     if (Math.max(ax, bx) < b.x0 - R || Math.min(ax, bx) > b.x1 + R || Math.max(ay, by) < b.y0 - R || Math.min(ay, by) > b.y1 + R) continue;
     const i0 = Math.max(0, Math.floor((Math.min(ax, bx) - R - b.x0) / step)), i1 = Math.min(nx - 1, Math.ceil((Math.max(ax, bx) + R - b.x0) / step));
@@ -743,8 +996,9 @@ function reachableRooms(apt, segments, start) {
     if (d < best) [best, s] = [d, j * nx + i];
   }
   const seen = new Uint8Array(nx * ny), queue = [s], rooms = new Set();
-  if (s < 0) return rooms;
+  if (s < 0) return cells ? 0 : rooms;
   seen[s] = 1;
+  let count = 1;
   while (queue.length) {
     const c = queue.pop(), i = c % nx, j = (c - i) / nx;
     for (const [di, dj] of [[1, 0], [-1, 0], [0, 1], [0, -1]]) {
@@ -753,19 +1007,23 @@ function reachableRooms(apt, segments, start) {
       const n = jj * nx + ii;
       if (seen[n] || blocked[n]) continue;
       seen[n] = 1;
+      count++;
       queue.push(n);
     }
   }
+  if (cells) return count;
+  // a room is reached when a fair part of it is (not only the cells in its doorway)
   apt.data.rooms.forEach((r, k) => {
     const rb = bbox(r.poly);
-    for (let j = Math.max(0, Math.floor((rb.y0 - b.y0) / step)); j < Math.min(ny, Math.ceil((rb.y1 - b.y0) / step) + 1) && !rooms.has(k); j++) {
+    let all = 0, got = 0;
+    for (let j = Math.max(0, Math.floor((rb.y0 - b.y0) / step)); j < Math.min(ny, Math.ceil((rb.y1 - b.y0) / step) + 1); j++) {
       for (let i = Math.max(0, Math.floor((rb.x0 - b.x0) / step)); i < Math.min(nx, Math.ceil((rb.x1 - b.x0) / step) + 1); i++) {
-        if (seen[j * nx + i] && inside(r.poly, cx(i), cy(j))) {
-          rooms.add(k);
-          break;
-        }
+        if (blocked[j * nx + i] || !inside(r.poly, cx(i), cy(j))) continue;
+        all++;
+        if (seen[j * nx + i]) got++;
       }
     }
+    if (got && got >= Math.min(20, 0.3 * all)) rooms.add(k);
   });
   return rooms;
 }
@@ -799,11 +1057,22 @@ function casing(k, mat, r) {
 }
 
 /** a door leaf from hinge h to tip (standing in the room), its face towards w */
-function doorLeaf(k, M, h, tip, w, entrance) {
-  const mat = entrance ? M.entrance : M.door;
-  slab(k, mat, h, tip, w, 0.006, 0.04, 0.008, DOOR_H - 0.006);
+function doorLeaf(k, M, h, tip, w, entrance, glazed = false) {
   const L = dist(h, tip), d = [(tip[0] - h[0]) / L, (tip[1] - h[1]) / L];
   const at = (s) => [h[0] + d[0] * s, h[1] + d[1] * s];
+  if (glazed) {
+    // a balcony door: a slim frame round a glass panel
+    const fw = 0.07;
+    slab(k, M.frame, h, at(fw), w, 0.006, 0.05, 0.008, DOOR_H - 0.006);
+    slab(k, M.frame, at(L - fw), tip, w, 0.006, 0.05, 0.008, DOOR_H - 0.006);
+    slab(k, M.frame, at(fw), at(L - fw), w, 0.006, 0.05, 0.008, 0.12);
+    slab(k, M.frame, at(fw), at(L - fw), w, 0.006, 0.05, DOOR_H - 0.08, DOOR_H - 0.006);
+    slab(k, M.glass, at(fw), at(L - fw), w, 0.026, 0.01, 0.12, DOOR_H - 0.08);
+    slab(k, M.chrome, at(L - 0.12), at(L - 0.1), w, 0.056, 0.02, 0.95, 1.15);
+    return;
+  }
+  const mat = entrance ? M.entrance : M.door;
+  slab(k, mat, h, tip, w, 0.006, 0.04, 0.008, DOOR_H - 0.006);
   // lever handles on both faces (the leaf's faces are 0.006 and 0.046 from the hinge line)
   for (const [lever, rose] of [[0.058, 0.046], [-0.02, -0.004]]) {
     slab(k, M.blackMetal, at(L - 0.2), at(L - 0.07), w, lever, 0.014, 0.99, 1.012);
@@ -849,7 +1118,7 @@ function radiator(k, M, a, b, n, len) {
 /** sheer curtains gathered at both ends of a window, on a ceiling track */
 function curtains(k, M, a, b, n, H, len) {
   const off = 0.13;
-  slab(k, M.blackMetal, a, b, n, off - 0.015, 0.03, H - 0.035, H - 0.005, 0.3);
+  slab(k, M.blackMetal, a, b, n, off - 0.015, 0.03, H - CEIL - 0.035, H - CEIL - 0.005, 0.3);
   const u = [(b[0] - a[0]) / len, (b[1] - a[1]) / len];
   const facing = Math.atan2(n[1], n[0]);
   const cw = Math.min(0.55, len * 0.3);
@@ -1153,7 +1422,7 @@ function placeDrawn({ k, M, H, apt, solid, keepout, lights, ceiling }) {
         }
         if (ceiling) {
           k.at(it.c[0], it.c[1], it.a - Math.PI / 2);
-          F.pendants(k, M, it.w >= 1.4 ? [-it.w / 4, it.w / 4] : [0], 0, H, 1.55);
+          F.pendants(k, M, it.w >= 1.4 ? [-it.w / 4, it.w / 4] : [0], 0, H - CEIL, 1.55);
           lights.push({ x: it.c[0], y: it.c[1], z: 1.5, room, main: true });
           out.lit.add(room);
         }
@@ -1560,7 +1829,7 @@ function furnish(ctx) {
             F.island(k, M, iw);
             ctx.addOutline(footprint(p, s.facing, iw + 0.04, -0.47, 0.47));
             ctx.keepout.push(ifp);
-            if (ctx.ceiling) F.pendants(k, M, [-iw / 4, iw / 4], 0, H, 1.6);
+            if (ctx.ceiling) F.pendants(k, M, [-iw / 4, iw / 4], 0, H - CEIL, 1.6);
             light(p[0], p[1], 1.65, true);
           }
         }
@@ -1651,8 +1920,8 @@ function pendant(ctx, x, y, kind) {
   if (!ctx.ceiling) return;
   k.at(x, y, 0);
   if (kind === 'drum') {
-    k.cyl(M.blackMetal, 0, H - 0.012, 0, 0.06, H, 20);
-    k.cyl(M.blackMetal, 0, H - 0.55, 0, 0.003, H, 6);
+    k.cyl(M.blackMetal, 0, H - CEIL - 0.012, 0, 0.06, H - CEIL, 20);
+    k.cyl(M.blackMetal, 0, H - 0.55, 0, 0.003, H - CEIL, 6);
     k.lathe(M.shade, [[0.3, 0], [0.3, 0.26]], 0, H - 0.8, 0, 48);
     k.cyl(M.shade, 0, H - 0.8, 0, 0.29, H - 0.795, 48);
     k.cyl(M.brass, 0, H - 0.56, 0, 0.012, H - 0.55, 12);
@@ -1672,8 +1941,8 @@ function downlights(ctx) {
     for (let j = 0; j < ny; j++) {
       const x = r.x0 + (w * (i + 0.5)) / nx, y = r.y0 + (d * (j + 0.5)) / ny;
       k.at(x, y, 0);
-      k.cyl(M.chrome, 0, H - 0.004, 0, 0.05, H - 0.001, 24);
-      k.cyl(M.downlight, 0, H - 0.006, 0, 0.035, H - 0.003, 24);
+      k.cyl(M.chrome, 0, H - CEIL - 0.004, 0, 0.05, H - CEIL - 0.001, 24);
+      k.cyl(M.downlight, 0, H - CEIL - 0.006, 0, 0.035, H - CEIL - 0.003, 24);
     }
   }
   ctx.lights.push({ x: (r.x0 + r.x1) / 2, y: (r.y0 + r.y1) / 2, z: H - 0.03, room, main: false, spot: true });
@@ -1695,7 +1964,7 @@ function bathroom(ctx) {
 
 function balconyFurniture(k, M, poly) {
   const [x, y] = interiorPoint(poly);
-  if (distToPolygon(poly, x, y) > 0) return;
+  if (distToPolygon(poly, x, y) > 0) return null;
   k.at(x, y, 0);
   k.cyl(M.blackMetal, 0, 0, 0, 0.2, 0.01, 20);
   k.cyl(M.blackMetal, 0, 0, 0, 0.02, 0.72, 10);
@@ -1705,4 +1974,5 @@ function balconyFurniture(k, M, poly) {
     k.at(x + dx, y, dx > 0 ? Math.PI : 0).offset(0, -0.25);
     F.chair(k, M);
   }
+  return [x, y];
 }

@@ -97,7 +97,8 @@ export function addTrees(scene, protos, list, placed, toScene) {
   const mats = {};
   const matFor = (atlas) => (mats[atlas] ??= treeMaterial(atlas, size));
   // kinds of tree -> rendered variants (alternating where there are two)
-  const kinds = { broad: ['broad_b', 'broad', 'broad_b'], conifer: ['fir_a', 'fir_b'], poplar: ['poplar'], small: ['shrub'], shrub: ['shrub'] };
+  // (full: the full-crowned broadleaf added on 21.10.2026, atlas c)
+  const kinds = { broad: ['broad_b', 'full', 'broad', 'broad_b', 'full'], conifer: ['fir_a', 'fir_b'], poplar: ['poplar'], small: ['shrub'], shrub: ['shrub'] };
   // site plan proto (height, radius, light crown) -> kind
   const pick = (p, i) => {
     if (p.light && p.h <= 6) return 'small';
@@ -129,8 +130,9 @@ export function addTrees(scene, protos, list, placed, toScene) {
       q.setFromEuler(e.set(0, t.rot + rnd() * Math.PI * 2, 0));
       m4.compose(p.set(w.x, t.z, w.z), q, s.set(kh, kv, kh));
       mesh.setMatrixAt(i, m4);
-      // a little more or less green and light from tree to tree
-      tint.setHSL(0.27 + (rnd() - 0.5) * 0.05, 0.25 + rnd() * 0.15, 0.5 + (rnd() - 0.5) * 0.12).lerp(white, 0.72);
+      // a little more or less green and light from tree to tree; a touch brighter than the
+      // renders under an even sky, the fresh green of the client's renders in the sun
+      tint.setHSL(0.27 + (rnd() - 0.5) * 0.05, 0.3 + rnd() * 0.15, 0.5 + (rnd() - 0.5) * 0.12).lerp(white, 0.7).multiplyScalar(1.1 + rnd() * 0.12);
       mesh.setColorAt(i, tint);
     });
     mesh.castShadow = true;

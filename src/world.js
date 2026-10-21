@@ -54,6 +54,9 @@ function inCorridor(x, z, w, l) {
 
 /** the city round the complex: quarters of four- to nine-storey blocks on the street grid of the
  * site (turned 27 degrees), with trees along the streets and in the yards; returns the trees */
+// the modelled site in scene metres: the genplan's area and the school's ground (blender/ab)
+const offSite = (p) => (p.x > -237 && p.x < 209 && p.z > -160 && p.z < 132) || (p.x > -190 && p.x < 30 && p.z > -215 && p.z < -30);
+
 function city(scene) {
   const rnd = rng(31);
   const boxes = [], trees = [];
@@ -65,9 +68,10 @@ function city(scene) {
       const u0 = i * Q, v0 = j * Q;
       const d = Math.hypot(u0, v0);
       if (d > 1400) continue;
-      // not on the modelled site (the genplan area and the school to the north) nor on its roads
+      // not on the modelled site (the genplan area, spread 1.1 times, and the school's ground to
+      // the north-west) nor on its roads
       const c = site(u0, v0);
-      if ((c.x > -215 && c.x < 190 && c.z > -145 && c.z < 120) || (c.x > 0 && c.x < 250 && c.z > -235 && c.z < -90)) continue;
+      if (offSite(c)) continue;
       const kind = rnd();
       const n = kind < 0.15 ? 0 : 2 + Math.floor(rnd() * 4);
       for (let k = 0; k < n; k++) {
@@ -76,7 +80,7 @@ function city(scene) {
         const floors = d < 600 ? (rnd() < 0.25 ? 9 : 4 + Math.floor(rnd() * 2)) : 4 + Math.floor(rnd() * 3);
         const u = u0 + (rnd() - 0.5) * (Q - 60), v = v0 + (rnd() - 0.5) * (Q - 50);
         const p = site(u, v);
-        if ((p.x > -215 && p.x < 190 && p.z > -145 && p.z < 120) || (p.x > 0 && p.x < 250 && p.z > -235 && p.z < -90)) continue;
+        if (offSite(p)) continue;
         // nothing between the presentation cameras (renders 1 and 2) and the complex
         if (inCorridor(p.x, p.z, w, l)) continue;
         boxes.push({ x: p.x, z: p.z, w, l, h: floors * 3.0, r: a + (rnd() < 0.5 ? 0 : Math.PI / 2) });

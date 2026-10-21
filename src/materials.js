@@ -355,6 +355,28 @@ const LIB = {
   Wood: { set: 'deck', tile: 1.8, color: '#d9b08c', roughness: 0.9, normal: 0.6 },
   'Lattice wood': { set: 'deck', tile: 1.8, color: '#f0d2ad', roughness: 0.85, normal: 0.4 },
   'Rubber blue': { set: 'rubber', tile: 2, color: '#3f6ea8', roughness: 1, normal: 0.7 },
+  // the school (21.10.2026): white render, coloured fins, a dark stone plinth
+  'School render': { set: 'plaster', mapless: true, tile: 2.2, color: '#f2eee6', roughness: 0.8, normal: 0.25, vary: 0.015, env: 0.7 },
+  'School plinth': { set: 'concrete', tile: 2.5, color: '#66635e', roughness: 0.8, normal: 0.4, env: 0.5 },
+  'School terracotta': { set: 'plaster', mapless: true, tile: 2.2, color: '#c4633f', roughness: 0.75, normal: 0.25, env: 0.6 },
+  'School ochre': { set: 'plaster', mapless: true, tile: 2.2, color: '#dba849', roughness: 0.75, normal: 0.25, env: 0.6 },
+  'School teal': { set: 'plaster', mapless: true, tile: 2.2, color: '#318c88', roughness: 0.75, normal: 0.25, env: 0.6 },
+  'Court blue': { set: 'rubber', tile: 2, color: '#3a74ad', roughness: 0.95, normal: 0.4 },
+  // the six-a-side pitch: artificial turf mown in stripes, white goals, nets and a green mesh fence
+  Turf: { set: 'grass', tile: 1.2, color: '#4a9440', roughness: 0.95, normal: 0.45, vary: 0.02 },
+  'Turf light': { set: 'grass', tile: 1.2, color: '#5ca64f', roughness: 0.95, normal: 0.45, vary: 0.02 },
+  'Goal white': { color: '#f5f5f3', roughness: 0.35, metalness: 0.2, env: 0.9 },
+  Net: { color: '#f4f4f2', roughness: 0.7, opacity: 1, transparent: true, alpha: 'perforated', alphaTile: 0.12, env: 0.4 },
+  'Pitch fence': { color: '#32503f', roughness: 0.6, metalness: 0.3, opacity: 1, transparent: true, alpha: 'perforated', alphaTile: 0.09, env: 0.5 },
+  // playgrounds and the kindergarten
+  Sand: { set: 'concrete', mapless: true, tile: 1.5, color: '#e6d3a1', roughness: 1, normal: 0.8, vary: 0.04 },
+  Canopy: { color: '#f3f0e8', roughness: 0.85, env: 0.5 },
+  'Kinder render': { set: 'plaster', mapless: true, tile: 2.2, color: '#f7f3ec', roughness: 0.8, normal: 0.22, vary: 0.015, env: 0.7 },
+  // flower beds
+  'Flowers red': { color: '#c43048', roughness: 0.85, leafy: true, env: 0.35 },
+  'Flowers yellow': { color: '#e8c13c', roughness: 0.85, leafy: true, env: 0.35 },
+  'Flowers violet': { color: '#8f54b5', roughness: 0.85, leafy: true, env: 0.35 },
+  'Flowers white': { color: '#f2f0ea', roughness: 0.85, leafy: true, env: 0.35 },
   'Play orange': { set: 'rubber', tile: 2, color: '#c0603e', roughness: 1, normal: 0.7 },
   'Play blue': { set: 'rubber', tile: 2, color: '#2f6da8', roughness: 0.8, normal: 0.5 },
   // neighbours: plain massing in the model; storeys and windows are drawn on (facade: storey

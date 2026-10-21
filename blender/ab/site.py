@@ -1,25 +1,24 @@
-"""The site from the genplan (build/site_raw.json, tools/ab/site_map.py): ground, kerbs, hedges,
-lamps, benches, playgrounds, the football pitch, car parks, the kindergarten, the hospital (№13),
-the school to the north, the houses across the road; and the trees, cars and people the viewer draws.
+"""The site from the genplan (build/site_raw.json, tools/ab/site_map.py, spread: config.site_raw):
+ground, kerbs, hedges, lamps, benches, car parks, the hospital (№13), the houses across the road; the
+playgrounds, the six-a-side pitch, the kindergarten, the school north of the plot and the planting
+(landscape.py); and the trees, cars and people the viewer draws.
 
 Levels: roads at 0, paving +0.12, lawns +0.15 behind a kerb, play surfaces +0.13.
 """
-import json
 import math
-import os
 import random
 
-import numpy as np
-from shapely import affinity
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
 
 from complex.geom import MeshBuilder, make_object, resample, ring_coords
 
-ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
+from . import landscape as LS
+from .config import SPREAD, site_raw
 
 Z = dict(asphalt=0.0, paving=0.12, lawn=0.15, play=0.13, sport=0.13)
-REGION = box(-200, -110, 175, 135)
+S = SPREAD
+REGION = box(-200 * S, -110 * S, 175 * S, 135 * S)
 
 
 def polys_of(raw, cls):
@@ -130,90 +129,6 @@ def bench(mb, x, y, z, rot):
         mb.box(x + ca * e, y + sa * e, z, 0.08, 0.45, 0.42, 'Lamp dark', rot=rot)
 
 
-def play_set(mb, poly, z, rnd):
-    """Playground kit inside a play area: a tower with a slide, swings, springers, a climbing dome."""
-    c = poly.representative_point()
-    w = math.sqrt(poly.area)
-    items = []
-    inner = poly.buffer(-1.8)
-    if inner.is_empty:
-        return items
-    tries = 0
-    kinds = ['tower', 'swing', 'spring', 'dome', 'spring', 'swing', 'see']
-    k = 0
-    while k < min(len(kinds), max(2, int(poly.area / 45))) and tries < 120:
-        tries += 1
-        x0, y0, x1, y1 = inner.bounds
-        p = Point(rnd.uniform(x0, x1), rnd.uniform(y0, y1))
-        if not inner.contains(p) or any(p.distance(q) < 4.2 for q in items):
-            continue
-        items.append(p)
-        kind = kinds[k]
-        k += 1
-        rot = rnd.uniform(0, math.pi)
-        ca, sa = math.cos(rot), math.sin(rot)
-        x, y = p.x, p.y
-        if kind == 'tower':
-            for dx, dy in ((-0.8, -0.8), (0.8, -0.8), (0.8, 0.8), (-0.8, 0.8)):
-                mb.box(x + ca * dx - sa * dy, y + sa * dx + ca * dy, z, 0.12, 0.12, 2.6, 'Play blue', rot=rot)
-            mb.box(x, y, z + 1.2, 1.8, 1.8, 0.1, 'Wood', rot=rot)
-            mb.box(x, y, z + 2.6, 2.1, 2.1, 0.12, 'Play orange', rot=rot)
-            # slide
-            sx, sy = x + ca * 2.3, y + sa * 2.3
-            pts = [(x + ca * 0.9, y + sa * 0.9), (sx + ca * 1.4, sy + sa * 1.4)]
-            mb.tube(pts, [z + 1.2, z + 0.25], [z + 1.3, z + 0.35], 0.6, 'Fitness yellow')
-        elif kind == 'swing':
-            for e in (-1.4, 1.4):
-                mb.box(x + ca * e, y + sa * e, z, 0.1, 0.1, 2.3, 'Play blue', rot=rot)
-            mb.box(x, y, z + 2.3, 3.0, 0.1, 0.1, 'Play blue', rot=rot)
-            for e in (-0.6, 0.6):
-                mb.box(x + ca * e, y + sa * e, z + 0.45, 0.45, 0.2, 0.05, 'Rubber blue', rot=rot)
-                mb.box(x + ca * e, y + sa * e, z + 0.5, 0.02, 0.02, 1.8, 'Metal', rot=rot)
-        elif kind == 'spring':
-            mb.box(x, y, z, 0.18, 0.18, 0.45, 'Metal', rot=rot)
-            mb.blob(x, y, z + 0.7, 0.45, 0.2, 0.3, rnd.choice(['Kinder red', 'Kinder green', 'Kinder yellow']), subdiv=1)
-        elif kind == 'dome':
-            mb.blob(x, y, z + 0.05, 1.5, 1.5, 1.4, 'Dark lattice', subdiv=1)
-        else:
-            mb.box(x, y, z + 0.35, 3.0, 0.25, 0.08, 'Kinder yellow', rot=rot)
-            mb.box(x, y, z, 0.3, 0.3, 0.35, 'Metal', rot=rot)
-    return items
-
-
-def football(mb, poly, z):
-    r = poly.minimum_rotated_rectangle
-    c = list(r.exterior.coords)
-    e1 = (c[1][0] - c[0][0], c[1][1] - c[0][1])
-    e2 = (c[2][0] - c[1][0], c[2][1] - c[1][1])
-    if math.hypot(*e1) < math.hypot(*e2):
-        e1, e2 = e2, e1
-    L, W = math.hypot(*e1), math.hypot(*e2)
-    rot = math.atan2(e1[1], e1[0])
-    cx, cy = r.centroid.x, r.centroid.y
-    pitch = affinity.rotate(box(cx - L / 2, cy - W / 2, cx + L / 2, cy + W / 2), rot, origin=(cx, cy), use_radians=True)
-    mb.polygon_face(pitch, z + 0.02, 'Sport green')
-    ca, sa = math.cos(rot), math.sin(rot)
-    lines = [((-L / 2 + 1, -W / 2 + 1), (L / 2 - 1, -W / 2 + 1)), ((-L / 2 + 1, W / 2 - 1), (L / 2 - 1, W / 2 - 1)),
-             ((-L / 2 + 1, -W / 2 + 1), (-L / 2 + 1, W / 2 - 1)), ((L / 2 - 1, -W / 2 + 1), (L / 2 - 1, W / 2 - 1)),
-             ((0, -W / 2 + 1), (0, W / 2 - 1))]
-    T = lambda p: (cx + ca * p[0] - sa * p[1], cy + sa * p[0] + ca * p[1])
-    for a, b in lines:
-        mb.tube([T(a), T(b)], [z + 0.025] * 2, [z + 0.03] * 2, 0.1, 'Road line')
-    circle = [T((math.cos(t) * 3.0, math.sin(t) * 3.0)) for t in np.linspace(0, 2 * math.pi, 28, endpoint=False)]
-    mb.tube(circle, [z + 0.025] * len(circle), [z + 0.03] * len(circle), 0.1, 'Road line', closed=True)
-    for s in (-1, 1):
-        g = T((s * (L / 2 - 1), 0))
-        for e in (-1.5, 1.5):
-            p = T((s * (L / 2 - 1), e))
-            mb.box(p[0], p[1], z, 0.1, 0.1, 2.0, 'Frame light', rot=rot)
-        mb.box(g[0], g[1], z + 2.0, 0.1, 3.1, 0.1, 'Frame light', rot=rot)
-    # fence round the pitch, 4 m of mesh on posts
-    ring = ring_coords(pitch.buffer(0.6, join_style='mitre'))
-    mb.ribbon(ring, z, z + 4.0, 'Mesh screen', closed=True, double=True)
-    for p in resample(ring, 3.0):
-        mb.box(p[0], p[1], z, 0.08, 0.08, 4.0, 'Fence')
-
-
 def parking(mb, asphalt, spot, rnd, cars, blocked):
     """Bays along the asphalt edge nearest a "8" mark: 2.5 x 5 m, perpendicular, white lines; cars in most."""
     near = asphalt.intersection(Point(spot).buffer(22))
@@ -285,36 +200,6 @@ def flat_roof(mb, poly, z, parapet='Stone white'):
     mb.prism(ring, z, z + 0.9, parapet, parapet)
 
 
-def kindergarten(mb, polys, labels, rnd):
-    """Kindergarten for 300 (№7): three two-storey wings round a glazed hexagonal hall, coloured panels."""
-    wings = [p for p in polys if p.area > 150]
-    if not wings:
-        return
-    H = 7.4
-    for wi, w in enumerate(wings):
-        w = w.minimum_rotated_rectangle if w.area / w.minimum_rotated_rectangle.area > 0.85 else w.simplify(0.4)
-        punched(mb, w, 0.0, 2, 3.7, 'Kinder wall', bay=3.2, win=1.8, wh=1.7)
-        flat_roof(mb, w, H, 'Stone white')
-        # coloured vertical panels between windows
-        pts = ring_coords(w)
-        cols = ['Kinder red', 'Kinder yellow', 'Kinder blue', 'Kinder green']
-        for a, b in zip(pts, pts[1:] + pts[:1]):
-            L = math.dist(a, b)
-            if L < 6:
-                continue
-            ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
-            nx, ny = uy, -ux
-            for k, s in enumerate(np.arange(1.6, L - 1.0, 3.2)):
-                c = (a[0] + ux * s + nx * 0.08, a[1] + uy * s + ny * 0.08)
-                mb.box(c[0], c[1], 0.4, 1.1, 0.14, 6.6, cols[(k + wi) % 4], rot=math.atan2(uy, ux))
-    c = unary_union(wings).centroid
-    hexa = Polygon([(c.x + 6.5 * math.cos(t), c.y + 6.5 * math.sin(t)) for t in np.linspace(0, 2 * math.pi, 7)[:-1] + 0.3])
-    hexa = hexa.difference(unary_union(wings).buffer(0.2))
-    for q in parts(hexa):
-        mb.prism(q, 0.0, 4.2, 'Shop glass', 'Stone white')
-    labels.append(dict(x=round(c.x, 2), y=round(c.y, 2), z=H + 3, ru='Детский сад на 300 мест', tj='Боғчаи кӯдакона барои 300 ҷой', kind='kindergarten'))
-
-
 def hospital(mb, poly, labels):
     """№13 on the genplan: a five-storey hospital."""
     r = poly.minimum_rotated_rectangle
@@ -342,39 +227,12 @@ def hospital(mb, poly, labels):
     labels.append(dict(x=round(cc.x, 2), y=round(cc.y, 2), z=floors * fh + 4, ru='Больница', tj='Беморхона', kind='hospital'))
 
 
-def school(mb, labels, centre=(118.0, 150.0), rot_deg=27.5):
-    """The big school north of blocks Г and Д (marked "МАКТАБ" by the client): a four-storey U round a
-    yard, with a sports ground and a running track beside it."""
-    cx, cy = centre
-    rot = math.radians(rot_deg)
-    T = lambda g: affinity.translate(affinity.rotate(g, rot_deg, origin=(0, 0)), cx, cy)
-    main = T(box(-42, -8, 42, 8))
-    wing1 = T(box(-42, 8, -26, 40))
-    wing2 = T(box(26, 8, 42, 40))
-    hall = T(box(-12, 8, 12, 28))
-    for g, floors in ((main, 4), (wing1, 3), (wing2, 3)):
-        punched(mb, g, 0.0, floors, 3.6, 'School wall', bay=3.0, win=1.9, wh=1.9)
-        flat_roof(mb, g, floors * 3.6, 'School accent')
-    mb.prism(hall, 0.0, 9.0, 'School accent', 'Roof')
-    # sports ground with a track, south-west of the building
-    field = T(box(-120, -10, -50, 40))
-    mb.polygon_face(field, 0.05, 'Track red')
-    mb.polygon_face(field.buffer(-4.5), 0.07, 'Sport green')
-    yard = T(box(-26, 8, 26, 40)).difference(hall)
-    mb.polygon_face(yard, 0.04, 'Paving')
-    entrance = T(box(-6, -14, 6, -8))
-    mb.prism(entrance, 3.4, 3.7, 'Stone white', 'Stone white', 'Stone white')
-    c = main.centroid
-    labels.append(dict(x=round(c.x, 2), y=round(c.y, 2), z=4 * 3.6 + 4, ru='Школа', tj='Мактаб', kind='school'))
-    return unary_union([main, wing1, wing2, hall, field])
-
-
 # ----------------------------------------------------------------------------
 # the site
 # ----------------------------------------------------------------------------
 
 def build_site(mats, col, towers, pods):
-    raw = json.load(open(os.path.join(ROOT, 'build', 'site_raw.json')))
+    raw = site_raw()
     rnd = random.Random(20261020)
     plot = Polygon(raw['plot']).buffer(0)
     inside = plot.buffer(6)
@@ -426,9 +284,9 @@ def build_site(mats, col, towers, pods):
     # lettering that read as odd paving shapes): a 4 m pavement along the avenue, lawn beyond it,
     # the side roads kept; nothing else drawn there (a visual assumption, the genplan shows no
     # landscaping outside the plot)
-    ys = lambda x: -81.1 - 0.103 * (x + 80.0)        # the avenue's south kerb (fitted on the genplan)
-    south = Polygon([(-200, ys(-200) - 0.3), (176, ys(176) - 0.3), (176, -111), (-200, -111)]).difference(plot.buffer(2))
-    walk_s = south.intersection(LineString([(-110, ys(-110)), (176, ys(176))]).buffer(4.3, cap_style='flat').buffer(0))
+    ys = lambda x: S * (-81.1 - 0.103 * (x / S + 80.0))        # the avenue's south kerb (fitted on the genplan)
+    south = Polygon([(-200 * S, ys(-200 * S) - 0.3), (176 * S, ys(176 * S) - 0.3), (176 * S, -111 * S), (-200 * S, -111 * S)]).difference(plot.buffer(2))
+    walk_s = south.intersection(LineString([(-110 * S, ys(-110 * S)), (176 * S, ys(176 * S))]).buffer(4.3, cap_style='flat').buffer(0))
     # the side roads (wide asphalt running off the avenue): straightened, the slivers between them gone
     side = [regular(q, 2.0, 0.6) for q in parts(asphalt.intersection(south)) if q.area > 150 and q.buffer(-2.5).area > 20]
     side = [q for q in side if not q.is_empty]
@@ -491,6 +349,29 @@ def build_site(mats, col, towers, pods):
     if stray:
         paving = unary_union(keep_pav)
         lawn = unary_union([lawn] + [q.intersection(REGION) for q in stray])
+    # the school's ground north of the plot and the six-a-side pitch at №14 (landscape.py): the
+    # genplan's surfaces are cleared off them, they bring their own
+    wings = [Polygon(p).buffer(0) for p in raw.get('kinder', [])] or [g for g in cls['kindergarten'] if g.area > 150]
+    school_ground = LS.school_grounds(plot)
+    blue_small = [g for g in blue if g.within(plot.buffer(1)) and g.area <= 400]
+    hard = unary_union([asphalt, built] + blue_small + wings)
+    keep_off = unary_union([hard, play])
+    pitch_fit = LS.fit_pitch(sport, plot, hard, play) if not sport.is_empty else None
+    if pitch_fit:
+        print('six-a-side pitch: %.0f x %.0f m' % (pitch_fit[1], pitch_fit[2]))
+    cu = unary_union([school_ground.buffer(0.5)] + ([pitch_fit[3].buffer(0.25)] if pitch_fit else []))
+    lawn, paving, asphalt = (g.difference(cu) for g in (lawn, paving, asphalt))
+    # (the playground next to the pitch gives way to it: its edge a metre off the fence)
+    play = play.difference(school_ground.buffer(0.5))
+    if pitch_fit:
+        play = unary_union([q for q in parts(play.difference(pitch_fit[3].buffer(1.2))) if q.area > 4])
+        keep_off = unary_union([hard, play])
+    sport = Polygon()
+    # (the genplan's arrows and letters on the lawns left as small holes with a kerb round them:
+    # filled once more, after all the cutting above)
+    lawn = filled(lawn, 60.0).difference(unary_union([paving, play, asphalt]).buffer(0.01))
+    # (and such a symbol drawn as a lawn of its own by the plot's edge: a 5 m2 triangle with a kerb)
+    lawn = unary_union([q for q in parts(lawn) if q.area >= 12 or q.intersects(plot.buffer(-1.0))])
     mb = MeshBuilder()
     # ground far and wide: dry grass and dust, the roads on it
     mb.polygon_face(box(-1500, -1500, 1500, 1500).difference(REGION.buffer(-0.5)), -0.06, 'Ground')
@@ -507,18 +388,25 @@ def build_site(mats, col, towers, pods):
 
     mb = MeshBuilder()
     labels, cars, people, trees = [], [], [], []
-    # playgrounds and the pitch
+    # playgrounds (full of play equipment) and the six-a-side pitch
     for q in parts(play):
-        for p in play_set(mb, q, Z['play'], rnd):
-            for k in range(rnd.randint(1, 3)):
-                people.append([round(p.x + rnd.uniform(-2, 2), 2), round(p.y + rnd.uniform(-2, 2), 2), Z['play'], rnd.randrange(6)])
-    for q in parts(sport):
-        if q.area > 300:
-            football(mb, q, Z['sport'])
-    # kindergarten, hospital, ramps to the underground car park, substation
-    wings = [Polygon(p).buffer(0) for p in raw.get('kinder', [])] or [g for g in cls['kindergarten'] if g.area > 150]
-    kindergarten(mb, wings, labels, rnd)
-    hosp = [g for g in blue if Point(116.6, -13.2).distance(g) < 5]
+        if q.area >= 8:
+            LS.playground(mb, q, Z['play'], rnd, people)
+    pitch_trees = LS.mini_pitch(mb, pitch_fit, plot, keep_off, rnd, people) if pitch_fit else []
+    # kindergarten (the genplan's three wings, three storeys), its groups' verandas (the small dark
+    # red rectangles drawn round it), hospital, ramps to the underground car park, substation
+    kinder = LS.kindergarten(mb, wings, labels, rnd)
+    if kinder is not None:
+        for g in polys_of(raw, 'building'):
+            # (compact rectangles of 20-90 m2 away from the plot's red edge line, which reads as
+            # the same dark red)
+            r = g.minimum_rotated_rectangle
+            cs = list(r.exterior.coords)
+            longest = max(math.dist(cs[0], cs[1]), math.dist(cs[1], cs[2]))
+            if (20 < g.area < 90 and g.area > 0.7 * r.area and longest < 12 and g.distance(kinder) < 45
+                    and g.distance(plot.exterior) > 5 and not g.intersects(built.buffer(1))):
+                LS.veranda(mb, g, rnd)
+    hosp = [g for g in blue if Point(116.6 * S, -13.2 * S).distance(g) < 5]
     for g in hosp:
         hospital(mb, g, labels)
     for g in blue:
@@ -533,7 +421,7 @@ def build_site(mats, col, towers, pods):
         if w['t'] in ('ПС', '6'):
             x, y = w['p']
             mb.box(x, y, 0.0, 9.0 if w['t'] == 'ПС' else 5.0, 6.0 if w['t'] == 'ПС' else 4.0, 3.2, 'Stone white', rot=math.radians(27.5))
-    school_fp = school(mb, labels)
+    school_fp, school_trees = LS.school(mb, labels, plot, rnd, people)
 
     # houses across the roads (existing, "12"): plain five-storey blocks with drawn-on windows
     houses = []
@@ -628,10 +516,14 @@ def build_site(mats, col, towers, pods):
             rot = math.atan2(e[1], e[0]) + (math.pi if rnd.random() < 0.5 else 0)
             cars.append([round(p.x, 2), round(p.y, 2), 0.0, round(rot, 3), rnd.randrange(8)])
 
-    # trees: the genplan's, then lawns filled in, then street trees along the verges
+    # trees: the school's and the pitch's, the genplan's, then lawns filled in, then street trees
+    # along the verges (none on the pitch, the playgrounds or by the kindergarten's walls)
+    trees += school_trees + pitch_trees
+    no_trees = unary_union([built.buffer(3.5), school_fp.buffer(2), play.buffer(0.6)]
+                           + ([pitch_fit[3].buffer(2.5)] if pitch_fit else []) + ([kinder.buffer(3.0)] if kinder is not None else []))
+
     def free(p, gap):
-        return not built.buffer(3.5).contains(p) and not school_fp.buffer(2).contains(p) and all(
-            p.distance(Point(t[0], t[1])) >= gap for t in trees)
+        return not no_trees.contains(p) and all(p.distance(Point(t[0], t[1])) >= gap for t in trees)
     for x, y in raw['trees']:
         p = Point(x, y)
         if REGION.contains(p) and free(p, 2.5):
@@ -706,6 +598,9 @@ def build_site(mats, col, towers, pods):
             mulch(mb, t[0], t[1], Z['lawn'], min(1.3, 0.45 * t[4] + 0.35))
         elif paving.buffer(-0.8).contains(p):
             grate(mb, t[0], t[1], Z['paving'], 0.47)
+    # shrub groups and flower beds on the lawns
+    avoid = unary_union([Point(t[0], t[1]).buffer(max(1.2, t[4] * 0.6)) for t in trees] + [play.buffer(1.0), no_trees])
+    trees += LS.plantings(mb, lawn.intersection(inside), avoid, rnd, Z['lawn'])
     # people on the paths and plazas
     walk = paving.intersection(inside).difference(built.buffer(1.0))
     x0, y0, x1, y1 = walk.bounds

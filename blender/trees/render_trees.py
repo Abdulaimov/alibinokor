@@ -32,6 +32,8 @@ VARIANTS = {
     'fir_b': ('fir_sapling_medium', 'fir_sapling_medium_b_LOD0'),
     'poplar': ('pine_sapling_small', 'pine_sapling_small_a'),
     'shrub': ('searsia_lucida', 'searsia_lucida_a_LOD0'),
+    # 21.10.2026: a full-crowned broadleaf for the courtyards (atlas c: scripts/build_tree_atlas_c.py)
+    'full': ('island_tree_02', 'island_tree_02_LOD0'),
 }
 SIDE_VIEWS = 6
 

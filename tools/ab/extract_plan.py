@@ -160,8 +160,9 @@ class Sheet:
             return (round(dy, 4), round(dx, 4))
         return (round(dx, 4), round(-dy, 4))
 
-    def path_points(self, d, keep_curves=False):
-        """Sub-paths of a drawing as lists of plan points (curves flattened)."""
+    def path_points(self, d, keep_curves=False, close_rects=False):
+        """Sub-paths of a drawing as lists of plan points (curves flattened); close_rects: a
+        rectangle with its fourth side too (a closed outline)"""
         subs, cur, curves = [], [], []
         for it in d['items']:
             k = it[0]
@@ -170,7 +171,7 @@ class Sheet:
                     subs.append(cur)
                     cur = []
                 q = it[1].quad if k == 're' else it[1]
-                subs.append([q.ul, q.ur, q.lr, q.ll])
+                subs.append([q.ul, q.ur, q.lr, q.ll] + ([q.ul] if close_rects else []))
                 continue
             p0 = it[1]
             if cur and (abs(cur[-1].x - p0.x) > 1e-3 or abs(cur[-1].y - p0.y) > 1e-3):
@@ -240,7 +241,7 @@ class Sheet:
             self._fills = by
         return self._fills
 
-    def strokes(self, colour, width=None, curves=False):
+    def strokes(self, colour, width=None, curves=False, close_rects=False):
         out = []
         for d in self.drawings:
             if R2(d.get('color')) != colour:
@@ -250,7 +251,7 @@ class Sheet:
             if curves:
                 out.append(self.path_points(d, keep_curves=True))
             else:
-                out += [s for s in self.path_points(d) if len(s) >= 2]
+                out += [s for s in self.path_points(d, close_rects=close_rects) if len(s) >= 2]
         return out
 
 
@@ -310,6 +311,34 @@ def door_symbols(sh, gaps, room_geom, swings=None):
                 swings.append((round(mid[0], 3), round(mid[1], 3), round(mid[0] + nx * k, 3), round(mid[1] + ny * k, 3)))
         out.append(Polygon([(o.x + ux * s0 + nx * T, o.y + uy * s0 + ny * T), (o.x + ux * s1 + nx * T, o.y + uy * s1 + ny * T),
                             (o.x + ux * s1 - nx * T, o.y + uy * s1 - ny * T), (o.x + ux * s0 - nx * T, o.y + uy * s0 - ny * T)]))
+    return out
+
+
+def door_arcs(sh):
+    """The swings of the doors drawn as polylines (black, any width): a run of points on a circle of
+    0.5-1.15 m (the leaf), 25-100 degrees of it (doors are drawn part open). {c: the hinge, r, mid:
+    the middle of the arc}"""
+    import numpy as np
+    out = []
+    for d in sh.drawings:
+        if R2(d.get('color')) != (0.0, 0.0, 0.0):
+            continue
+        for s in sh.path_points(d):
+            if len(s) < 4:
+                continue
+            P = np.array(s)
+            x, y = P[:, 0], P[:, 1]
+            sol = np.linalg.lstsq(np.c_[2 * x, 2 * y, np.ones(len(P))], x * x + y * y, rcond=None)[0]
+            cx, cy = sol[0], sol[1]
+            r = math.sqrt(max(sol[2] + cx * cx + cy * cy, 0.0))
+            if not 0.5 <= r <= 1.15 or np.abs(np.hypot(x - cx, y - cy) - r).max() > 0.02:
+                continue
+            a0, a1 = math.atan2(y[0] - cy, x[0] - cx), math.atan2(y[-1] - cy, x[-1] - cx)
+            span = abs((a1 - a0 + math.pi) % (2 * math.pi) - math.pi)
+            if not math.radians(25) <= span <= math.radians(100):
+                continue
+            m = s[len(s) // 2]
+            out.append(dict(c=(float(cx), float(cy)), r=r, mid=(m[0], m[1])))
     return out
 
 
@@ -388,12 +417,18 @@ def extract(key):
         room_geom[c] = snap(unary_union([p.buffer(0.004) for p in by[c]]).buffer(-0.004))
 
     # columns and concrete walls: closed outlines
-    lines = [LineString(s) for col in STRUCT_STROKES for s in sh.strokes(col)]
-    # (letters drawn in the same blue - the lift capacities "Q=1000 кг" - are no columns: they are
-    # small and far from solid, a column or a wall piece is a near rectangle)
-    struct = [p for p in polygonize(unary_union(lines))
-              if p.area > 0.03 and not (p.area < 0.6 and p.area < 0.75 * p.minimum_rotated_rectangle.area)]
-    struct = snap(unary_union([p.buffer(0.005) for p in struct]))
+    def struct_of(close_rects):
+        lines = [LineString(s) for col in STRUCT_STROKES for s in sh.strokes(col, close_rects=close_rects)]
+        # (letters drawn in the same blue - the lift capacities "Q=1000 кг" - are no columns: they
+        # are small and far from solid, a column or a wall piece is a near rectangle)
+        out = [p for p in polygonize(unary_union(lines))
+               if p.area > 0.03 and not (p.area < 0.6 and p.area < 0.75 * p.minimum_rotated_rectangle.area)]
+        return snap(unary_union([p.buffer(0.005) for p in out]))
+    # the pieces drawn as rectangles (the hatched partitions a TV hangs on, between a bedroom and
+    # its loggia) are walls too; the rooms are cut out as before, by the outlines drawn as lines -
+    # the rectangles' outlines lie over the rooms' fills and would shave their areas off the sheet's
+    struct = struct_of(True)
+    struct_rooms = struct_of(False)
 
     rooms_all = unary_union(list(room_geom.values()))
     fill_walls = snap(unary_union([p.buffer(0.004) for p in by.get(WALL_FILL, [])]).buffer(-0.004))
@@ -451,7 +486,7 @@ def extract(key):
     # columns standing inside a room stay part of it (the viewer draws them in the room)
     solid = unary_union([walls, struct])
     for c, g0 in room_geom.items():
-        g = g0.difference(walls).difference(struct.buffer(0.01)) if not g0.is_empty else g0
+        g = g0.difference(walls).difference(struct_rooms.buffer(0.01)) if not g0.is_empty else g0
         for q in parts(g.buffer(-0.02).buffer(0.02)):
             q = Polygon(q.exterior) if q.interiors and all(Polygon(h).area < 2.5 for h in q.interiors) else q
             if q.area >= 0.6:
@@ -462,6 +497,7 @@ def extract(key):
     fixtures = parts(unary_union([LineString(s).buffer(0.03) for s in sh.strokes(FIXTURE_STROKE)]))
     fixtures = [p.minimum_rotated_rectangle for p in fixtures if p.area > 0.05]
     doors_balc = [LineString(s) for s in sh.strokes(BALCONY_DOOR_STROKE, 0.42) if len(s) >= 2]
+    arcs = door_arcs(sh)
 
     gl = glyphs(by)
     for r in rooms:
@@ -478,7 +514,7 @@ def extract(key):
     if not outline_walls.is_empty and not air.is_empty:
         walls = snap(walls.difference(outline_walls.intersection(air.buffer(0.45))))
     return sh, dict(rooms=rooms, walls=walls, struct=struct, enclosure=enclosure, outside=outside, fixtures=fixtures,
-                    doors_balc=doors_balc, doors=doors, apt_colours=apt_colours)
+                    doors_balc=doors_balc, doors=doors, apt_colours=apt_colours, arcs=arcs)
 
 
 def classify(r):
@@ -649,6 +685,16 @@ def openings(key, x):
                     if glass_tower and f.length <= 1.3 and all(q['poly'].area <= SMALL_LOGGIA_AREA for q in air):
                         door_to.add(id(air[0]))
                         continue  # block A's service balconies: walls and a door, the door's gap no window
+                    if f.length <= 1.3 and all(q['poly'].area <= SMALL_LOGGIA_AREA for q in air):
+                        # a service loggia with its door drawn (the leaf's swing at the gap): a doorway,
+                        # opening the way the drawing has it
+                        arc = next((q for q in x.get('arcs', []) if f.distance(Point(q['c'])) < 0.35 and q['r'] <= f.length + 0.35), None)
+                        if arc:
+                            door_to.add(id(air[0]))
+                            m = f.interpolate(0.5, normalized=True)
+                            k = 0.5 if (arc['mid'][0] - m.x) * n[0] + (arc['mid'][1] - m.y) * n[1] > 0 else -0.5
+                            x.setdefault('swings', []).append((round(m.x, 3), round(m.y, 3), round(m.x + n[0] * k, 3), round(m.y + n[1] * k, 3)))
+                            continue
                 elif mine_air and (glass_tower or r['kind'] == 'terrace'):
                     continue  # the open edge of a balcony or terrace: a railing, not a window
                 # how far out the wall reaches next to the opening
@@ -983,7 +1029,58 @@ def build(key):
     keep = [fx for fx in x['fixtures'] if fx.intersection(ways).area < 0.02]
     print('  %d fittings across doorways left out' % (len(x['fixtures']) - len(keep)))
     x['fixtures'] = keep
+    open_entrances(x)
+    fill_slits(x)
     return sh, x
+
+
+def fill_slits(x, width=0.14):
+    """The slits the drawing leaves between two pieces of wall, a wall and a window, a window and
+    a column (up to 14 cm; a doorway is wider): filled with wall, never into a room. Seen from
+    inside they were dark lines from floor to ceiling, with the outside or the next room in them."""
+    solid = unary_union([x['walls'], x['struct']] + list(x['windows']) + list(x['glazing']))
+    closed = solid.buffer(width / 2, join_style='mitre').buffer(-width / 2, join_style='mitre')
+    rooms = unary_union([r['poly'] for r in x['rooms']])
+    slits = closed.difference(solid).difference(rooms.buffer(0.005, join_style='mitre'))
+    keep = [g for g in parts(slits) if g.area > 2e-4]
+    if keep:
+        walls = unary_union([shapely.set_precision(x['walls'], 0)] + keep)
+        # (no pinholes left inside the walls: they cannot be drawn as prisms)
+        walls = unary_union([Polygon(q.exterior, [h for h in q.interiors if Polygon(h).area > 0.2]) for q in parts(walls)])
+        x['walls'] = snap(walls)
+    print('  %d slits between walls filled (%.2f m2)' % (len(keep), sum(g.area for g in keep)))
+
+
+def open_entrances(x):
+    """Every flat has a way in from the corridor. Sheet A draws some entrances as a plain opening
+    in the concrete wall, with no door symbol; the strip of wall read there (between the flat and
+    the corridor, door-sized, between concrete) is taken out, the viewer puts the door in."""
+    common = unary_union([r['poly'] for r in x['rooms'] if r['common']])
+    if common.is_empty:
+        return
+    solid = unary_union([x['walls'], x['struct']])
+    for f in x['flats']:
+        rooms = unary_union([r['poly'] for r in f['rooms'] if r['kind'] not in ('loggia', 'terrace')])
+        # a way through already: free floor between a room of the flat and the corridor
+        reach = rooms.buffer(0.6).intersection(common.buffer(0.6)).difference(solid)
+        if any(g.intersects(rooms.buffer(0.01)) and g.intersects(common.buffer(0.01)) and min_width(g) > 0.5 for g in parts(reach)):
+            continue
+        cands = []
+        for w in parts(x['walls']):
+            if w.distance(rooms) > 0.06 or w.distance(common) > 0.06:
+                continue
+            L = max(min_width(w), max(math.dist(*list(w.minimum_rotated_rectangle.exterior.coords)[i:i + 2]) for i in range(2)))
+            if 0.7 <= L <= 1.3 and min_width(w) <= 0.5 and w.area < 0.65:
+                hall = any(r['kind'] == 'hall' and r['poly'].distance(w) < 0.06 for r in f['rooms'])
+                cands.append((0 if hall else 1, abs(L - 0.95), w))
+        if not cands:
+            print('  flat with no way in from the corridor and no strip to open:', f.get('label'))
+            continue
+        _, _, w = min(cands, key=lambda c: c[:2])
+        # (the walls may hold the same piece more than once: every piece within the strip goes)
+        # (compared by place and size: overlays with the snapped walls lose small pieces)
+        x['walls'] = snap(unary_union([g for g in parts(x['walls']) if not (g.centroid.distance(w.centroid) < 0.02 and abs(g.area - w.area) < 0.02)]))
+        print('  entrance with no door symbol opened at %.1f, %.1f (%s)' % (w.centroid.x, w.centroid.y, f.get('label')))
 
 
 def uncoloured_rooms(x):

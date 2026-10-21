@@ -131,11 +131,11 @@ def podium_sites():
     from shapely.geometry import Polygon
     from shapely.ops import unary_union
     from ab.towers import footprint
-    from ab.config import load_plans
+    from ab.config import load_plans, site_raw
     path = os.path.join(ROOT, 'build', 'site_raw.json')
     if not os.path.exists(path):
         return {}
-    raw = json.load(open(path))['classes']
+    raw = site_raw()['classes']
     polys = []
     for cls in ('podium', 'building'):
         for p in raw.get(cls, []):
