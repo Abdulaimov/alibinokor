@@ -39,6 +39,16 @@
       </div>
     </div>
     <button id="quality" class="btn small" type="button"></button>
+    <div id="daytime" class="panel" data-phase="day" hidden>
+      <svg class="dt-sun" viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="4.2" /><path d="M12 2.5v2.6M12 18.9v2.6M2.5 12h2.6M18.9 12h2.6M5.3 5.3l1.8 1.8M16.9 16.9l1.8 1.8M5.3 18.7l1.8-1.8M16.9 7.1l1.8-1.8" /></svg>
+      <svg class="dt-moon" viewBox="0 0 24 24" aria-hidden="true"><path d="M19.5 14.6A8 8 0 0 1 9.4 4.5a8 8 0 1 0 10.1 10.1z" /></svg>
+      <input id="daytime-range" type="range" />
+      <b id="daytime-clock"></b>
+    </div>
+    <button id="eye" class="panel" type="button" aria-pressed="false">
+      <svg class="eye-open" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-6.5 10-6.5S22 12 22 12s-3.6 6.5-10 6.5S2 12 2 12z" /><circle cx="12" cy="12" r="3" /></svg>
+      <svg class="eye-shut" viewBox="0 0 24 24" aria-hidden="true"><path d="M3.5 8.5C5.6 11 8.6 12.6 12 12.6s6.4-1.6 8.5-4.1M6.6 11.4 5 14M10 12.5l-.6 3M14 12.5l.6 3M17.4 11.4 19 14" /></svg>
+    </button>
     <div id="tooltip"></div>
 
     <div id="walk-ui" hidden>

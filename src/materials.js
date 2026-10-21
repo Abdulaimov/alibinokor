@@ -8,6 +8,8 @@ import { Q } from './quality.js';
 import { alphaTexture, brickTextures, groundTexture } from './textures.js';
 
 const BASE = `${import.meta.env.BASE_URL}textures/`;
+// lights on at dusk and at night, 0..1 (src/night.js): the windows of the complex and of the city
+export const NIGHT = { value: 0 };
 const loader = new THREE.TextureLoader();
 const sources = new Map(); // `${set}/${kind}` -> Promise<Texture> (one download / GPU upload per file)
 let anisotropy = 8;
@@ -60,6 +62,7 @@ const NOISE = /* glsl */ `
 //         glass (some windows lit or curtained), frames, floor bands; roofs a darker membrane
 const FACADE = /* glsl */ `
   float facadeGlass = 0.0;
+  vec3 facadeLight = vec3(0.0);
   {
     vec3 fn = normalize(vWorldNormal);
     if (abs(fn.y) < 0.5) {
@@ -77,6 +80,9 @@ const FACADE = /* glsl */ `
       room = mix(room, vec3(0.62, 0.56, 0.46), step(0.88, h) * 0.7);   // curtains, a lit room
       room = mix(room, vec3(0.78, 0.78, 0.76), step(0.8, h) * step(h, 0.88) * step(0.6, f.y) * 0.6); // blinds half down
       diffuseColor.rgb = mix(diffuseColor.rgb, room, win * inner * 0.7);
+      // at night about a third of the windows are lit, warm, a few cooler (a television, LEDs)
+      float on = step(1.0 - 0.36 * uNight, hash12(vec2(bay, storey) * 1.31 + floor(vWorldPos.xz / 60.0) * 5.0 + 3.7));
+      facadeLight = win * inner * on * uNight * mix(vec3(1.0, 0.72, 0.42), vec3(0.75, 0.8, 0.9), step(0.85, h)) * 0.9;
       diffuseColor.rgb = mix(diffuseColor.rgb, diffuseColor.rgb * 1.08, win * (1.0 - inner));
       facadeGlass = win * inner;
       // a band at each floor slab, a darker plinth
@@ -135,8 +141,10 @@ const INTERIOR = /* glsl */ `
       }
       // daylight from the window falls off into the room
       col *= mix(1.0, 0.35, clamp(h.z / D, 0.0, 1.0));
-      float lit = step(0.972, r1);
-      vec3 light = mix(vec3(uInt2.x), vec3(0.62, 0.52, 0.38), lit);
+      // a few rooms have the lights on by day, nearly half at night (warm; some cooler, a TV's blue)
+      float lit = step(mix(0.972, 0.56, uNight), r1);
+      vec3 lamp = mix(vec3(0.62, 0.52, 0.38), vec3(0.5, 0.52, 0.56), step(0.8, r3) * uNight) * (1.0 + 1.3 * uNight);
+      vec3 light = mix(vec3(uInt2.x * (1.0 - 0.94 * uNight)), lamp, lit);
       if (lit > 0.5 && t != tm.z && d.y > 0.0) col = vec3(1.0, 0.94, 0.82);   // the lit ceiling
       vec3 room = col * light;
       // curtains half drawn, or blinds let down, just behind the glass
@@ -145,12 +153,12 @@ const INTERIOR = /* glsl */ `
       float cw = W * (0.12 + 0.2 * r3);
       if (r2 > 0.62 && pc.y < H - 0.25 && (pc.x < cw || pc.x > W - cw)) {
         vec3 cc = mix(vec3(0.82, 0.78, 0.70), vec3(0.55, 0.50, 0.46), r1);
-        room = cc * mix(uInt2.y * 0.9, 0.7, lit);
+        room = cc * mix(uInt2.y * 0.9 * (1.0 - 0.92 * uNight), 0.7 * (1.0 + 0.8 * uNight), lit);
       }
       if (r2 < 0.18 && pc.y > H * (0.45 + 0.4 * r3)) {
         float sy = pc.y / 0.06, fw = max(fwidth(sy), 1e-3);
         float slat = 0.8 + 0.2 * clamp((abs(fract(sy) - 0.5) - 0.25) / fw + 0.5, 0.0, 1.0) * (1.0 - clamp(fw - 0.5, 0.0, 1.0));
-        room = vec3(0.86, 0.85, 0.82) * uInt2.y * slat;
+        room = vec3(0.86, 0.85, 0.82) * mix(uInt2.y * (1.0 - 0.92 * uNight), 0.55 + 0.5 * uNight, lit * uNight) * slat;
       }
       // coated glass is a part mirror: the sky (blue above, haze at the horizon, the ground below)
       // over the room, more of it at grazing angles; the real reflections (clouds) come on top
@@ -158,9 +166,11 @@ const INTERIOR = /* glsl */ `
       float up = rr.y;
       vec3 skyR = mix(vec3(0.80, 0.85, 0.88), vec3(0.36, 0.52, 0.74), smoothstep(0.02, 0.7, up));
       skyR = mix(vec3(0.30, 0.31, 0.28), skyR, smoothstep(-0.06, 0.03, up));
+      skyR *= 1.0 - 0.9 * uNight;   // the night sky (and the lit city in it) is dark in the glass
       float cosv = clamp(-dot(dir, Nn), 0.0, 1.0);
       float fres = uMirror + (1.0 - uMirror) * pow(1.0 - cosv, 5.0);
-      roomLight = room * uTint * (1.0 - fres) + skyR * uTint * fres * uRefl;
+      // a lit room at night shows its own warm light, not the glass's daytime tint
+      roomLight = room * mix(uTint, vec3(1.0), lit * uNight * 0.85) * (1.0 - fres) + skyR * uTint * fres * uRefl;
       // the tilt of this pane (world space; turned into view space where the normal is set)
       paneTilt = (Tg * (r2 - 0.5) + vec3(0.0, 1.0, 0.0) * (r3 - 0.5)) * uInt2.z;
     }
@@ -179,6 +189,7 @@ function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, faca
     sh.uniforms.uInt2 = { value: new THREE.Vector3(it[4], it[5], it[6]) };
     sh.uniforms.uMirror = { value: it[7] ?? 0.1 };
     sh.uniforms.uRefl = { value: it[8] ?? 0.9 };
+    sh.uniforms.uNight = NIGHT;
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWorldPos;\nvarying vec3 vWorldNormal;')
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
@@ -192,7 +203,7 @@ function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, faca
           on = mat3(instanceMatrix) * on; // the typical floors are instances, turned with their block
         #endif
         vWorldNormal = normalize(mat3(modelMatrix) * on);`);
-    let frag = sh.fragmentShader.replace('#include <common>', `#include <common>\nvarying vec3 vWorldPos;\nvarying vec3 vWorldNormal;\nuniform float uVary;\nuniform vec3 uTint;\nuniform vec3 uFacade;\nuniform vec4 uInt;\nuniform vec3 uInt2;\nuniform float uMirror;\nuniform float uRefl;\n${NOISE}`);
+    let frag = sh.fragmentShader.replace('#include <common>', `#include <common>\nvarying vec3 vWorldPos;\nvarying vec3 vWorldNormal;\nuniform float uVary;\nuniform vec3 uTint;\nuniform vec3 uFacade;\nuniform vec4 uInt;\nuniform vec3 uInt2;\nuniform float uMirror;\nuniform float uRefl;\nuniform float uNight;\n${NOISE}`);
     if (detile) {
       frag = frag.replace('#include <map_fragment>', `
         #ifdef USE_MAP
@@ -220,7 +231,8 @@ function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, faca
       frag = frag
         .replace('#include <color_fragment>', `#include <color_fragment>\n${FACADE}`)
         .replace('#include <roughnessmap_fragment>', `#include <roughnessmap_fragment>
-          roughnessFactor = mix(roughnessFactor, 0.06, facadeGlass);`);
+          roughnessFactor = mix(roughnessFactor, 0.06, facadeGlass);`)
+        .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>\n  totalEmissiveRadiance += facadeLight;`);
     }
     if (leafy) {
       frag = frag

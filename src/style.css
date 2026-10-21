@@ -21,6 +21,9 @@
 html, body { margin: 0; height: 100%; overflow: hidden; background: var(--ground); }
 button { font: inherit; color: inherit; cursor: pointer; }
 #stage, #stage canvas { position: fixed; inset: 0; width: 100%; height: 100%; display: block; touch-action: none; }
+/* black behind the frame: the trees' cut-out edges (alpha to coverage) leave alpha below 1 in it
+   (three.js keeps an alpha channel), and the page's light ground showed through as a white rim */
+#stage canvas { background: #000; }
 
 .panel {
   background: var(--panel);
@@ -217,4 +220,43 @@ body.no-webgl #ext-ui, body.no-webgl #quality { display: none; }
   #walk-help { display: none; }
   #minimap canvas { width: 160px; height: 100px; }
   .chip-lg { font-size: 12px; }
+}
+
+/* time of day: a slider from early morning to late night (src/night.js) */
+#daytime { position: fixed; left: 50%; bottom: calc(16px + env(safe-area-inset-bottom, 0px)); transform: translateX(-50%); z-index: 6; display: flex; align-items: center; gap: 10px; width: 300px; padding: 8px 14px; }
+#daytime[hidden] { display: none; }
+#daytime svg { width: 20px; height: 20px; flex: none; fill: none; stroke: #c98a2e; stroke-width: 2; stroke-linecap: round; }
+#daytime .dt-sun circle { fill: #f2b33d; stroke: none; }
+#daytime .dt-moon { display: none; }
+#daytime .dt-moon path { fill: #5b6fa6; stroke: none; }
+#daytime[data-phase='dusk'] .dt-sun circle { fill: #e9773c; }
+#daytime[data-phase='dusk'] .dt-sun { stroke: #e9773c; }
+#daytime[data-phase='night'] .dt-sun { display: none; }
+#daytime[data-phase='night'] .dt-moon { display: block; }
+#daytime b { min-width: 44px; font-size: 15px; font-variant-numeric: tabular-nums; text-align: right; }
+#daytime-range { flex: 1; min-width: 0; height: 28px; margin: 0; background: transparent; -webkit-appearance: none; appearance: none; cursor: pointer; --k: 50%; }
+#daytime-range::-webkit-slider-runnable-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #f6d38a 0%, #8ec5ef 18%, #8ec5ef 58%, #f19a5b 74%, #6b5c9a 82%, #1d2440 100%); }
+#daytime-range::-moz-range-track { height: 6px; border-radius: 3px; background: linear-gradient(90deg, #f6d38a 0%, #8ec5ef 18%, #8ec5ef 58%, #f19a5b 74%, #6b5c9a 82%, #1d2440 100%); }
+#daytime-range::-webkit-slider-thumb { -webkit-appearance: none; width: 20px; height: 20px; margin-top: -7px; border-radius: 50%; background: #fff; border: 2px solid var(--ink); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
+#daytime-range::-moz-range-thumb { width: 16px; height: 16px; border-radius: 50%; background: #fff; border: 2px solid var(--ink); box-shadow: 0 2px 6px rgba(0, 0, 0, 0.25); }
+#daytime-range:focus-visible { outline: 2px solid var(--accent); outline-offset: 2px; border-radius: 4px; }
+#hint { bottom: calc(70px + env(safe-area-inset-bottom, 0px)); }
+body.walking #daytime { top: calc(16px + env(safe-area-inset-top, 0px)); bottom: auto; width: 270px; }
+
+/* the eye: every panel away, only the view (src/main.js setClean) */
+#eye { position: fixed; top: calc(16px + env(safe-area-inset-top, 0px)); right: calc(16px + 340px + 10px); z-index: 7; width: 44px; height: 44px; padding: 0; display: grid; place-items: center; border-radius: 50%; }
+#eye svg { width: 22px; height: 22px; fill: none; stroke: var(--ink); stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+#eye .eye-shut { display: none; }
+#eye:hover { filter: brightness(1.05); box-shadow: 0 10px 30px rgba(20, 30, 45, 0.26); }
+body.walking #eye { right: 16px; top: calc(72px + env(safe-area-inset-top, 0px)); }
+body.clean #eye .eye-open { display: none; }
+body.clean #eye .eye-shut { display: block; }
+body.clean #ext-ui, body.clean #walk-ui, body.clean #labels, body.clean #places, body.clean #quality,
+body.clean #daytime, body.clean #hint, body.clean #tooltip { display: none !important; }
+
+@media (max-width: 760px) {
+  #daytime { top: calc(118px + env(safe-area-inset-top, 0px)); bottom: auto; left: 16px; right: 16px; width: auto; transform: none; padding: 6px 12px; }
+  body.walking #daytime { top: calc(80px + env(safe-area-inset-top, 0px)); right: 70px; width: auto; }
+  #eye { right: 16px; top: calc(16px + env(safe-area-inset-top, 0px)); width: 40px; height: 40px; }
+  body.walking #eye { top: calc(80px + env(safe-area-inset-top, 0px)); }
 }

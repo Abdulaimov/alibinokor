@@ -59,7 +59,7 @@ const offSite = (p) => (p.x > -237 && p.x < 209 && p.z > -160 && p.z < 132) || (
 
 function city(scene) {
   const rnd = rng(31);
-  const boxes = [], trees = [];
+  const boxes = [], trees = [], lights = [];
   const a = (27 * Math.PI) / 180, ca = Math.cos(a), sa = Math.sin(a);
   const Q = 150; // a quarter with its streets
   const site = (u, v) => ({ x: ca * u - sa * v, z: -(sa * u + ca * v) });
@@ -93,6 +93,10 @@ function city(scene) {
         trees.push({ ...site(u, v), h: 7 + rnd() * 6 });
       }
       for (let k = 0; k < 8; k++) trees.push({ ...site(u0 + (rnd() - 0.5) * Q * 0.8, v0 + (rnd() - 0.5) * Q * 0.8), h: 6 + rnd() * 6 });
+      // street lights along two of its edges (the next quarter has the other two), lit at night
+      for (let t = -Q / 2 + 12; t < Q / 2; t += 27) {
+        for (const [u, v] of [[u0 + t, v0 - Q / 2 + 4], [u0 - Q / 2 + 4, v0 + t]]) lights.push({ ...site(u, v), y: 7.5 });
+      }
     }
   }
   const geo = new THREE.BoxGeometry(1, 1, 1).translate(0, 0.5, 0);
@@ -113,7 +117,7 @@ function city(scene) {
   im.receiveShadow = true;
   im.name = 'city';
   scene.add(im);
-  return { mat, trees };
+  return { mat, trees, lights };
 }
 
 /**
@@ -160,7 +164,7 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
   plain.position.y = -0.12;
   plain.receiveShadow = false;
   scene.add(plain);
-  const { mat: cityMat, trees: cityTrees } = city(scene);
+  const { mat: cityMat, trees: cityTrees, lights: cityLights } = city(scene);
 
   const pmrem = new THREE.PMREMGenerator(renderer);
   const hdr = new RGBELoader().setDataType(THREE.FloatType);
@@ -219,7 +223,9 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
           }
         }
       });
-      fill.removeFromParent();
+      // dark from now on, kept for the moonlit sky at night (src/night.js): the number of lights stays
+      // the same, so no shader is rebuilt when the evening comes
+      fill.intensity = 0;
       pmrem.dispose();
     })
     .catch((e) => console.warn('sky', e));
@@ -243,5 +249,5 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
       .catch((e) => console.warn('sky background', e));
   }
 
-  return { sun, cityMat, ready: Promise.all([ready, props]) };
+  return { sun, fill, cityMat, cityLights, ready: Promise.all([ready, props]) };
 }

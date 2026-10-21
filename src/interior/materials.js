@@ -6,15 +6,29 @@ import * as T from './textures.js';
 
 let M = null;
 
+// the rooms' lights at night, for a floor opened from outside (main.js sets it from src/night.js;
+// walking through a flat its own light does)
+export const ROOM_LIGHT = { value: 0 };
+const roomLit = (m) => {
+  m.onBeforeCompile = (sh) => {
+    sh.uniforms.uRoomLight = ROOM_LIGHT;
+    sh.fragmentShader = sh.fragmentShader
+      .replace('#include <common>', '#include <common>\nuniform float uRoomLight;')
+      .replace('#include <emissivemap_fragment>', '#include <emissivemap_fragment>\n  totalEmissiveRadiance += diffuseColor.rgb * vec3(1.0, 0.86, 0.68) * uRoomLight;');
+  };
+  m.customProgramCacheKey = () => 'roomLit';
+  return m;
+};
+
 export function interiorMaterials() {
   if (M) return M;
   const std = (o, boxUV) => {
-    const m = new THREE.MeshStandardMaterial(o);
+    const m = roomLit(new THREE.MeshStandardMaterial(o));
     if (boxUV) m.userData.boxUV = boxUV;
     return m;
   };
   const phys = (o, boxUV) => {
-    const m = new THREE.MeshPhysicalMaterial(o);
+    const m = roomLit(new THREE.MeshPhysicalMaterial(o));
     if (boxUV) m.userData.boxUV = boxUV;
     return m;
   };
