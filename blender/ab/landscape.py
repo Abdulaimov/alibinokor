@@ -376,11 +376,12 @@ def goal(mb, F, u, v, sgn, w, h, z, depth=None):
 # ----------------------------------------------------------------------------
 
 def fit_pitch(sport, plot, hard, soft):
-    """Where the six-a-side pitch goes: in the corner the genplan gives №14, turned as drawn (or a
-    quarter turn), as large as a six-a-side pitch should be: 32 x 19 m down to 20 x 12 m of pitch,
-    1.5 m round it inside the fence. Never on hard (roads, buildings, the plot's edge); the
-    neighbouring playground (soft) gives way, up to 200 m2 of it. Returns (frame, length, width,
-    fence outline)."""
+    """Where the six-a-side pitch goes: in the corner the genplan gives №14, turned as drawn (its
+    long side along the road, the goals at its north-west and south-east ends - not across, as the
+    user pointed out on the genplan photo), as large as a six-a-side pitch should be: 32 x 19 m down
+    to the drawn 20 x 12 m of pitch, 1.5 m round it inside the fence. Never on hard (roads,
+    buildings, the plot's edge); the neighbouring playground (soft) gives way, up to 250 m2 of it.
+    Returns (frame, length, width, fence outline)."""
     from shapely.prepared import prep
     g = max(parts(sport), key=lambda q: q.area)
     r = g.minimum_rotated_rectangle
@@ -393,18 +394,17 @@ def fit_pitch(sport, plot, hard, soft):
     c0 = r.centroid
     room = prep(plot.buffer(-1.5).difference(hard.buffer(1.2)))
     soft_b = soft.buffer(1.2)
-    for Lp, Wp in ((32, 19), (30, 18), (28, 17), (26, 16), (24, 15), (22, 13), (20, 12)):
+    for Lp, Wp in ((32, 19), (30, 18), (28, 17), (26, 16), (25, 15), (24, 15), (23, 14), (22, 13), (21, 12.5), (20.5, 12)):
         cands = []
-        for a2 in (ang, ang + math.pi / 2):
-            for du in np.arange(-16.0, 16.1, 1.0):
-                for dv in np.arange(-16.0, 16.1, 1.0):
-                    F = Frame(c0.x + math.cos(ang) * du - math.sin(ang) * dv, c0.y + math.sin(ang) * du + math.cos(ang) * dv, a2)
-                    fence = F.rect(-Lp / 2 - 1.5, -Wp / 2 - 1.5, Lp / 2 + 1.5, Wp / 2 + 1.5)
-                    if room.contains(fence):
-                        cands.append((fence.intersection(soft_b).area, abs(du) + abs(dv), F))
+        for du in np.arange(-16.0, 16.1, 0.5):
+            for dv in np.arange(-6.0, 6.1, 0.5):
+                F = Frame(c0.x + math.cos(ang) * du - math.sin(ang) * dv, c0.y + math.sin(ang) * du + math.cos(ang) * dv, ang)
+                fence = F.rect(-Lp / 2 - 1.5, -Wp / 2 - 1.5, Lp / 2 + 1.5, Wp / 2 + 1.5)
+                if room.contains(fence):
+                    cands.append((fence.intersection(soft_b).area, abs(du) + abs(dv), F))
         if cands:
             lost, _, F = min(cands, key=lambda c: (c[0], c[1]))
-            if lost <= 200.0:
+            if lost <= 250.0:
                 return F, float(Lp), float(Wp), F.rect(-Lp / 2 - 1.5, -Wp / 2 - 1.5, Lp / 2 + 1.5, Wp / 2 + 1.5)
     F = Frame(c0.x, c0.y, ang)
     Lp, Wp = max(18.0, math.hypot(*e1) - 3.0), max(11.0, math.hypot(*e2) - 3.0)
