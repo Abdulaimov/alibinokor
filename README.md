@@ -65,6 +65,8 @@ npm run build      # готовый сайт в dist/ (относительны�
 
 ## Публикация на GitHub Pages
 
+Сайт: **https://abdulaimov.github.io/alibinokor/** (репозиторий github.com/Abdulaimov/alibinokor).
+
 Каждый push в `main` собирается и публикуется `.github/workflows/deploy.yml`
 (в настройках репозитория: Settings → Pages → Source: GitHub Actions).
 
