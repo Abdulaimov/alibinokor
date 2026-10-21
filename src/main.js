@@ -241,10 +241,20 @@ let labels = [];
 function sidesText(a) {
   return a.sides.map((s) => L().sides[s]).join(', ');
 }
+let liftLabels = [];
 function buildLabels() {
   labelsEl.innerHTML = '';
   labels = [];
+  liftLabels = [];
   if (state.mode !== 'floor') return;
+  // the lifts of the open floor, as on the drawings: how many, and their capacities
+  for (const t of dollhouse[0]?.liftTags ?? []) {
+    const el = document.createElement('div');
+    el.className = 'tag lift';
+    el.innerHTML = `<b>${L().lifts(t.q.length)}</b> <span>· Q ${t.q.join(' / ')} ${L().kg}</span>`;
+    labelsEl.appendChild(el);
+    liftLabels.push({ el, pos: new THREE.Vector3(t.x, t.y, t.z) });
+  }
   for (const a of aptsOnFloor(state.tower, state.floor)) {
     const el = document.createElement('div');
     el.className = 'tag';
@@ -262,6 +272,12 @@ function project(v) {
   return { x: ((tmp.x + 1) / 2) * innerWidth, y: ((1 - tmp.y) / 2) * innerHeight, behind: tmp.z > 1 };
 }
 function updateLabels() {
+  for (const { el, pos } of liftLabels) {
+    const p = project(pos);
+    el.style.display = p.behind ? 'none' : '';
+    el.style.left = `${p.x}px`;
+    el.style.top = `${p.y}px`;
+  }
   for (const { el, apt } of labels) {
     const u = building.units.get(apt.id);
     const tc = towerCentre(apt.tower);
@@ -585,6 +601,7 @@ function enterWalk(a) {
     clearDollhouse();
     labelsEl.innerHTML = '';
     labels = [];
+    liftLabels = [];
     building.showAll(a.tower, a.floor);
     walkInterior = buildFloor(a.tower, a.floor, aptsOnFloor(a.tower, a.floor), a);
     scene.add(walkInterior.group);

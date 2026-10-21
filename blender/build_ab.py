@@ -186,7 +186,7 @@ def main():
     os.makedirs(os.path.dirname(out), exist_ok=True)
     bpy.ops.wm.save_as_mainfile(filepath=out + '.blend', compress=True)
     used = sorted({fl['plan'] for t in towers for fl in t['floors']})
-    keep = ('title', 'slab', 'enclosure', 'walls', 'struct', 'windows', 'glazing', 'common', 'apartments', 'swings')
+    keep = ('title', 'slab', 'enclosure', 'walls', 'struct', 'windows', 'glazing', 'common', 'apartments', 'lifts', 'swings')
     with open(out + '.plans.json', 'w') as f:
         json.dump({k: {kk: plans[k][kk] for kk in keep if kk in plans[k]} for k in used}, f, separators=(',', ':'), ensure_ascii=False)
     info = dict(site_centre=[0.0, 0.0], towers=towers, people=podium.PEOPLE + (site['people'] if site else []),

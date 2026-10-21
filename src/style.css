@@ -141,6 +141,8 @@ button { font: inherit; color: inherit; cursor: pointer; }
 .tag:hover, .tag.hover { transform: translate(-50%, -100%) scale(1.08); background: #ffa42b; border-left-color: #ff8a00; z-index: 2; }
 .tag:hover span, .tag.hover span { color: #3b2508; }
 .tag b { font-size: 13px; }
+.tag.lift { pointer-events: none; cursor: default; border-left-color: #8d98a3; background: rgba(255, 255, 255, 0.92); font-size: 11px; padding: 4px 8px; }
+.tag.lift b { font-size: 12px; }
 .tag span { color: var(--muted); }
 
 #tooltip { position: fixed; pointer-events: none; background: rgba(20, 26, 34, 0.9); color: #fff; padding: 8px 11px; border-radius: 10px; font-size: 12px; line-height: 1.4; opacity: 0; transition: opacity 0.1s; z-index: 5; }

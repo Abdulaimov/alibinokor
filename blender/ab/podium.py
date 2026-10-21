@@ -8,6 +8,7 @@ them from PEOPLE). Residential entrances on the courtyard side of the slab block
 """
 import math
 import random
+import zlib
 
 from shapely.geometry import LineString, Point, Polygon
 from shapely.ops import unary_union
@@ -276,7 +277,7 @@ def build_base(key, b, plan, mats, col, put, podium_site=None):
     global GROUND, SECOND, TOP
     GROUND, SECOND, _ = config.dims(b)
     TOP = GROUND + SECOND
-    rnd = random.Random(hash(key) & 0xffff)
+    rnd = random.Random(zlib.crc32(key.encode()) & 0xffff)   # (str hash() changes from run to run)
     enc = Polygon(plan['enclosure']).buffer(0)
     base = enc.buffer(-0.1, join_style='mitre')
     outline = base

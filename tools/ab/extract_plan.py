@@ -29,6 +29,7 @@ from shapely.ops import polygonize, split, unary_union
 
 sys.path.insert(0, os.path.dirname(__file__))
 from labels import glyphs, room_name  # noqa: E402
+import furniture  # noqa: E402
 
 ROOT = os.path.join(os.path.dirname(__file__), '..', '..')
 SHEETS = os.path.join(ROOT, '..', '00_Материалы_клиента', 'Планы')
@@ -363,9 +364,23 @@ def drop_lettering(walls, struct):
     return walls
 
 
+# fills a sheet leaves out where the other sheet of the same block has them: the sheet of block
+# A's terrace floors draws one bathroom (C/У 3,45 m2 of the north-east flat) white, the typical
+# floor's sheet has its colour (the walls of block A are the strips between the coloured rooms)
+BORROW_FILLS = {'A_t': [('A', (13.6, 15.0))]}
+
+
 def extract(key):
     sh = Sheet(key)
     by = sh.fills()
+    for src, pt in BORROW_FILLS.get(key, []):
+        for c, ps in Sheet(src).fills().items():
+            if c in IGNORE_FILL or c in COMMON_FILL:
+                continue
+            room = [q for q in parts(unary_union([p.buffer(0.002) for p in ps]).buffer(-0.002)) if q.contains(Point(*pt))]
+            if room and not any(p.contains(Point(*pt)) for p in by.get(c, [])):
+                by[c] = list(by.get(c, [])) + room
+                print('  %s: the fill at %.1f, %.1f taken from sheet %s (%.2f m2)' % (key, pt[0], pt[1], src, room[0].area))
 
     apt_colours = [c for c, ps in by.items() if c not in IGNORE_FILL and c not in COMMON_FILL and sum(p.area for p in ps) > 3.0]
     room_geom = {}
@@ -971,6 +986,32 @@ def build(key):
     return sh, x
 
 
+def uncoloured_rooms(x):
+    """Rooms the drawing left without their flat's colour (a bathroom drawn white on one sheet):
+    the holes in the floor's outline that hold drawn sanitary ware become rooms of the flat next
+    to them (a bathroom if there is a bath, else a WC)."""
+    added = []
+    for hole_ring in x['enclosure'].interiors:
+        hole = Polygon(hole_ring)
+        if not 1.0 < hole.area < 12.0:
+            continue
+        fits = [it for it in x.get('furniture', []) if it['type'] in ('toilet', 'bath', 'basin') and hole.contains(Point(*it['c']))]
+        if not fits:
+            continue
+        # (less the strips of white between walls that the hole also takes in)
+        poly = hole.difference(x['walls']).difference(x['struct'])
+        poly = poly.buffer(-0.15, join_style='mitre').buffer(0.15, join_style='mitre').intersection(poly)
+        poly = snap(max(parts(poly), key=lambda q: q.area))
+        f = min(x['flats'], key=lambda f: min(r['poly'].distance(poly) for r in f['rooms']))
+        kind = 'bath' if any(it['type'] == 'bath' for it in fits) else 'wc'
+        r = dict(colour=f['colour'], poly=poly, common=False, fill_area=poly.area, area=poly.area, outer=0.0, fix=[],
+                 width=min_width(poly), label=None, kind=kind)
+        f['rooms'].append(r)
+        x['rooms'].append(r)
+        added.append(r)
+    return added
+
+
 def to_json(key, x):
     def rings(g):
         out = []
@@ -992,14 +1033,37 @@ def to_json(key, x):
         outline = unary_union([r['poly'].buffer(0.2, join_style='mitre') for r in f['rooms']]).buffer(-0.2, join_style='mitre')
         outline = max(parts(outline), key=lambda q: q.area)
         n, area = f.get('label', (f['rooms_count'], f['drawn_area']))
+        # the furniture and sanitary ware drawn in the flat's rooms (furniture.py)
+        mine = unary_union([r['poly'].buffer(0.1) for r in f['rooms']])
+        furn = [it for it in x.get('furniture', []) if mine.contains(Point(*furniture.point_of(it)))]
         flats.append(dict(colour='#%02x%02x%02x' % tuple(int(v * 255) for v in f['colour']), rooms_count=n,
                           label_rooms=n, area=round(area, 2), outline=ring(outline), rooms=rooms, balconies=balconies,
-                          fixtures=[ring(fx) for fx in x['fixtures'] if outline.buffer(0.1).contains(fx.centroid)]))
+                          furniture=furn))
     common = [ring(r['poly']) for r in x['rooms'] if r['common']]
     return dict(title=SHEET_INFO[key]['title'], slab=ring(enc), enclosure=ring(enc), walls=rings(x['walls']),
                 struct=rings(x['struct']), windows=[ring(w) for w in x['windows']], glazing=[ring(g) for g in x['glazing']],
-                common=common, apartments=flats,
+                common=common, apartments=flats, lifts=x.get('lifts', []),
                 swings=[[p[0], p[1], p[2], p[3]] for p in x.get('swings', [])])
+
+
+def keep_order(new, old):
+    """The flats in the order of the previous export: the site numbers the flats of a floor in
+    this order, so a change to the extraction must not renumber them."""
+    if not old or len(old.get('apartments', [])) != len(new['apartments']):
+        return new
+    nc = [Polygon(a['outline']).centroid for a in new['apartments']]
+    order = []
+    for a in old['apartments']:
+        o = Polygon(a['outline']).centroid
+        free = [j for j in range(len(nc)) if j not in order]
+        j = min(free, key=lambda j: nc[j].distance(o))
+        if nc[j].distance(o) > 2.0:
+            return new   # the plan has changed: numbered afresh
+        order.append(j)
+    if order != sorted(order):
+        print('  flats kept in the order of the previous export')
+    new['apartments'] = [new['apartments'][j] for j in order]
+    return new
 
 
 def draw_debug(key, x, scale=40):
@@ -1053,6 +1117,9 @@ def main():
     out = {}
     for key in keys:
         sh, x = build(key)
+        x['furniture'], x['lifts'] = furniture.extract(sh, x)
+        for r in uncoloured_rooms(x):
+            print('  a room drawn without its colour: %s %.2f m2 at %.1f, %.1f' % (r['kind'], r['area'], r['poly'].centroid.x, r['poly'].centroid.y))
         print(key, 'rooms', len(x['rooms']), 'flats', len(x['flats']), '(labels %d)' % len(LABELS[key]),
               'windows', len(x['windows']), 'glazing', len(x['glazing']), 'walls %.0f m2' % x['walls'].area)
         for f in sorted(x['flats'], key=lambda f: f['drawn_area']):
@@ -1063,6 +1130,8 @@ def main():
     dst = os.path.join(ROOT, 'blender', 'ab', 'plans.json')
     os.makedirs(os.path.dirname(dst), exist_ok=True)
     old = json.load(open(dst)) if os.path.exists(dst) else {}
+    for key in out:
+        out[key] = keep_order(out[key], old.get(key))
     old.update(out)
     json.dump(old, open(dst, 'w'), separators=(',', ':'), ensure_ascii=False)
     print('->', dst)
