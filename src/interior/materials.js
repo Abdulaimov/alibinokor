@@ -39,8 +39,10 @@ export function interiorMaterials() {
     // shell
     floor: std({ map: oak.map, roughnessMap: oak.rough, roughness: 0.62, bumpMap: oak.bump, bumpScale: 0.35, envMapIntensity: 0.9 }),
     tileFloor: std({ map: tileFloor, roughness: 0.22, envMapIntensity: 0.9 }),
-    // the floor under the rooms' own, seen only where they stop short (under the doorways, along walls)
-    floorUnder: Object.assign(std({ map: oak.map, roughnessMap: oak.rough, roughness: 0.62, bumpMap: oak.bump, bumpScale: 0.35, envMapIntensity: 0.9 }), { polygonOffset: true, polygonOffsetFactor: 1, polygonOffsetUnits: 1 }),
+    // the floor under the rooms' own, seen only where they stop short (under the doorways, along
+    // walls). No polygon offset: pushed back, it lost to the building's slab 3 mm below at grazing
+    // angles and a grey strip of concrete showed by the doorways
+    floorUnder: std({ map: oak.map, roughnessMap: oak.rough, roughness: 0.62, bumpMap: oak.bump, bumpScale: 0.35, envMapIntensity: 0.9 }),
     tileWall: std({ map: tile.map, roughness: 0.16, envMapIntensity: 0.9 }, tile.metres),
     wall: std({ color: 0xf1ede6, map: plaster.map, roughness: 0.92, envMapIntensity: 0.55 }, plaster.metres),
     struct: std({ color: 0xebe7e0, map: plaster.map, roughness: 0.92, envMapIntensity: 0.55 }, plaster.metres),

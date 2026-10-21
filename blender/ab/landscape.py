@@ -159,28 +159,38 @@ def school_frame(plot):
     return Frame(cx - F.s * shift, cy + F.c * shift, ang), L, W
 
 
+# the school's ground along v (away from the plot), from the plot's side: a green strip by the
+# fence, the sports ground, the yard, the school, a green strip at the back (21.10.2026: the user
+# asked for the stadium first and the school behind it)
+DEPTH = 131.5
+
+
 def school_grounds(plot):
     """the school's fenced ground (for clearing the genplan's surfaces off it before they are drawn)"""
     F, L, W = school_frame(plot)
-    return F.rect(-L / 2 - 8.0, -W / 2 - 3.5, L / 2 + 8.0, -W / 2 + 112.0)
+    return F.rect(-L / 2 - 8.0, -W / 2 - 3.5, L / 2 + 8.0, -W / 2 - 3.5 + DEPTH)
 
 
 def school(mb, labels, plot, rnd, people):
-    """The school in place of the writing, as long as the letters and as deep: a four-storey main
-    block along the plot (the classrooms), white render with terracotta, ochre and teal fins between
-    the windows, glass stair towers; behind it the gym (teal), the assembly hall (terracotta) and
-    between them the entrance hall (glass, two storeys, a canopy over the steps) facing the yard;
-    then the sports ground: a 200 m track round a pitch, two courts. All fenced, trees along the
+    """The school north of the plot, where the genplan photo has «МАКТАБ», as long as the writing.
+    From the plot's side: the sports ground (a 200 m track round a pitch, a court at its east end, a
+    path from the gate at its west end), the yard with trees and benches, then the school: the
+    entrance hall facing the yard (glass, two storeys, a canopy over the steps), the four-storey main
+    block (white render with terracotta, ochre and teal fins between the windows, glass stair towers)
+    and behind it the gym (teal) and the assembly hall (terracotta). All fenced, trees along the
     fence. Returns (the ground, its trees)."""
     F, L, W = school_frame(plot)
     ang = F.ang
     H, fh = 15.2, 3.8            # four storeys
-    v0 = -W / 2                  # the front, towards the plot
-    v1 = v0 + 17.0               # the back of the main block
+    vf = -W / 2 - 3.5            # the fence on the plot's side
+    vt = vf + 33.5               # the track's middle
+    vy0, vy1 = vf + 61.5, vf + 79.5   # the yard
+    vs = vy1                     # the entrance hall's front
+    v0, v1 = vs + 7.0, vs + 24.0      # the main block
     main = F.rect(-L / 2, v0, L / 2, v1)
+    lobby = F.rect(-15.0, vs, 15.0, v0)
     gym = F.rect(-L / 2 + 2.0, v1, -L / 2 + 34.0, v1 + 24.0)
     hall = F.rect(L / 2 - 30.0, v1, L / 2 - 2.0, v1 + 20.0)
-    lobby = F.rect(-15.0, v1, 15.0, v1 + 7.0)
     # main block
     mb.prism(main.buffer(0.04, join_style='mitre'), 0.0, 0.7, 'School plinth')
     block(mb, main, 0.0, H, 'School render', 'School render')
@@ -197,7 +207,7 @@ def school(mb, labels, plot, rnd, people):
                 mb.tube([q0, q1], [f * fh - 0.18] * 2, [f * fh + 0.12] * 2, 0.16, 'School render')
         else:
             window_row(mb, a, b, 0.0, 4, fh, 3.3, 1.6, 2.1, 0.95, 'Window glass', 'Frame dark')
-    # glass stair towers at the thirds of the front, a little proud of it
+    # glass stair towers at the thirds of the front (on the yard), a little proud of it
     for u in (-L / 3, L / 3):
         core = F.rect(u - 3.2, v0 - 0.6, u + 3.2, v0 + 0.2)
         mb.prism(core, 0.0, H + 1.2, 'Stair glass', 'Frame dark')
@@ -206,14 +216,14 @@ def school(mb, labels, plot, rnd, people):
         for k in (-3.15, 0.0, 3.15):
             x, y = F(u + k, v0 - 0.62)
             mb.box(x, y, 0.0, 0.14, 0.14, H + 1.2, 'Frame dark', rot=ang)
-    # gym and assembly hall
+    # gym and assembly hall behind it
     for g, h, wall in ((gym, 10.5, 'School teal'), (hall, 9.0, 'School terracotta')):
         mb.prism(g.buffer(0.04, join_style='mitre'), 0.0, 0.7, 'School plinth')
         block(mb, g, 0.0, h, wall, 'School render')
         for a, b in ring_edges(g):
             if math.dist(a, b) > 12 and LineString([a, b]).distance(main) > 1.0:
                 window_row(mb, a, b, h - 3.4, 1, 3.0, 3.0, 2.4, 1.7, 0.0, 'Window glass', 'Frame light')
-    # entrance hall: two storeys of glass between the gym and the hall, a canopy over the steps
+    # entrance hall: two storeys of glass in front of the main block, a canopy over the steps
     block(mb, lobby, 0.0, 8.4, 'Window glass', 'School render', coping=0.6)
     for a, b in ring_edges(lobby):
         Le = math.dist(a, b)
@@ -226,32 +236,33 @@ def school(mb, labels, plot, rnd, people):
             mb.box(x, y, 0.0, 0.1, 0.1, 8.4, 'Frame dark', rot=math.atan2(uy, ux))
         for z in (0.05, 4.2, 8.3):
             mb.tube([(a[0] + nx * 0.05, a[1] + ny * 0.05), (b[0] + nx * 0.05, b[1] + ny * 0.05)], [z - 0.06] * 2, [z + 0.06] * 2, 0.12, 'Frame dark')
-    canopy = F.rect(-11.0, v1 + 7.0, 11.0, v1 + 11.5)
+    canopy = F.rect(-11.0, vs - 4.5, 11.0, vs)
     mb.prism(canopy, 4.0, 4.35, 'School render', 'School render', 'School render')
     for u in (-10.2, -3.4, 3.4, 10.2):
-        x, y = F(u, v1 + 10.9)
+        x, y = F(u, vs - 3.9)
         cyl(mb, x, y, 0.1, 4.0, 0.14, 'Frame dark')
     for k in range(3):
-        mb.prism(F.rect(-8.0, v1 + 7.0, 8.0, v1 + 7.0 + 0.9 * (3 - k)), 0.1, 0.1 + 0.15 * (k + 1), 'Stone white', 'Stone white')
+        mb.prism(F.rect(-8.0, vs - 0.9 * (3 - k), 8.0, vs), 0.1, 0.1 + 0.15 * (k + 1), 'Stone white', 'Stone white')
     # solar panels on the main roof
     for k in range(-5, 6):
         x, y = F(k * 10.0, v0 + 8.5)
         if abs(k * 10.0) < L / 2 - 5:
             mb.box(x, y, H + 0.4, 7.5, 9.0, 0.08, 'Solar panel', rot=ang)
 
-    # ---- the ground: a green strip and the fence towards the plot; the yard behind, the sports
-    # ground beyond it ----
+    # ---- the ground ----
     built = unary_union([main, gym, hall, lobby])
-    ground = F.rect(-L / 2 - 8.0, v0 - 3.5, L / 2 + 8.0, v0 + 112.0)
-    yard = F.rect(-L / 2 - 8.0, v1, L / 2 + 8.0, v1 + 30.0).difference(built.buffer(0.02))
+    ground = F.rect(-L / 2 - 8.0, vf, L / 2 + 8.0, vf + DEPTH)
     mb.polygon_face(ground.difference(built.buffer(0.02)), 0.05, 'Lawn')
+    yard = F.rect(-L / 2 - 8.0, vy0, L / 2 + 8.0, vy1 + 0.0).union(F.rect(-L / 2 - 8.0, vy1, L / 2 + 8.0, v0)).difference(built.buffer(0.02))
     mb.polygon_face(yard, 0.1, 'Paving')
-    mb.polygon_face(F.rect(-L / 2 - 8.0, v0 - 3.5, L / 2 + 8.0, v0).difference(built.buffer(0.02)), 0.07, 'Lawn')
-    vb = v1 + 30.0                                    # the sports ground's near edge
-    track_c = F(0.0, vb + 33.0)
+    # the path from the gate on the plot's side, past the west end of the track, to the yard
+    gate = Point(F(-L / 2 - 1.0, vf))
+    path = F.rect(-L / 2 - 3.5, vf, -L / 2 + 1.5, vy0 + 0.5)
+    mb.polygon_face(path, 0.1, 'Paving')
+    # the sports ground: a 200 m track round a pitch, a court at its east end
     def stadium(half_len, r):
-        return unary_union([F.rect(-half_len, vb + 33.0 - r, half_len, vb + 33.0 + r),
-                            Point(F(-half_len, vb + 33.0)).buffer(r, 48), Point(F(half_len, vb + 33.0)).buffer(r, 48)])
+        return unary_union([F.rect(-half_len, vt - r, half_len, vt + r),
+                            Point(F(-half_len, vt)).buffer(r, 48), Point(F(half_len, vt)).buffer(r, 48)])
     track_outer, track_inner = stadium(28.0, 26.0), stadium(28.0, 19.5)
     mb.polygon_face(track_outer.difference(track_inner), 0.08, 'Track red')
     mb.polygon_face(track_inner, 0.08, 'Turf')
@@ -259,23 +270,22 @@ def school(mb, labels, plot, rnd, people):
         ln = track_inner.buffer(1.6 * k).exterior
         c2 = list(ln.coords)[:-1]
         mb.tube(c2, [0.085] * len(c2), [0.095] * len(c2), 0.06, 'Road line', closed=True)
-    pitch_lines(mb, F, 0.0, vb + 33.0, 52.0, 32.0, 0.085, goals=True)
-    for u0 in (-L / 2 - 4.0, L / 2 - 26.0):
-        court = F.rect(u0, vb + 4.0, u0 + 28.0, vb + 20.0)
-        if court.intersects(track_outer.buffer(2.5)):
-            continue
+    pitch_lines(mb, F, 0.0, vt, 52.0, 32.0, 0.085, goals=True)
+    cu0, cu1 = 57.0, min(L / 2 + 7.0, 72.0)
+    court = F.rect(cu0, vt - 14.0, cu1, vt + 14.0)
+    if not court.intersects(track_outer.buffer(1.5)):
         mb.polygon_face(court, 0.08, 'School teal')
-        mb.polygon_face(court.buffer(-1.0), 0.085, 'Court blue')
-        for su in (u0 + 1.0, u0 + 27.0):
-            x, y = F(su, vb + 12.0)
+        mb.polygon_face(court.buffer(-1.0), 0.1, 'Court blue')
+        cm = (cu0 + cu1) / 2
+        for sv in (-1, 1):
+            x, y = F(cm, vt + sv * 13.0)
             cyl(mb, x, y, 0.08, 3.05, 0.06, 'Metal', n=8)
-            F.box(mb, su + (0.45 if su < u0 + 14 else -0.45), vb + 12.0, 2.9, 0.05, 1.8, 1.05, 'Frame light')
-    # the fence (a gate in the yard's middle, at the back)
-    gate = Point(F(0.0, v0 + 112.0))
+            F.box(mb, cm, vt + sv * 12.55, 2.9, 1.8, 0.05, 1.05, 'Frame light')
+    # the fence, the gate on the plot's side
     cs = list(ground.exterior.coords)
     for a, b in zip(cs, cs[1:]):
         seg = LineString([a, b])
-        cut = seg.difference(gate.buffer(4.0)) if seg.distance(gate) < 0.5 else seg
+        cut = seg.difference(gate.buffer(2.5)) if seg.distance(gate) < 0.5 else seg
         for p in getattr(cut, 'geoms', [cut]):
             if p.is_empty or p.length < 0.5:
                 continue
@@ -284,7 +294,7 @@ def school(mb, labels, plot, rnd, people):
             mb.tube(c2, [1.86] * len(c2), [1.92] * len(c2), 0.05, 'Fence')
             for q in [p.interpolate(t) for t in np.arange(0.0, p.length + 0.01, 2.5)]:
                 mb.box(q.x, q.y, 0.05, 0.06, 0.06, 1.95, 'Fence')
-    # trees: a row along the fence and along the front, groups in the yard
+    # trees: a row along the fence, a row with benches in the yard
     trees = []
     c0 = ground.centroid
     for t in np.arange(4.0, ground.exterior.length, 8.0):
@@ -292,23 +302,19 @@ def school(mb, labels, plot, rnd, people):
         k = 2.2 / max(1.0, q.distance(c0))
         x, y = q.x + (c0.x - q.x) * k, q.y + (c0.y - q.y) * k
         pt = Point(x, y)
-        if pt.distance(built) < 4.5 or pt.distance(track_outer) < 2.5 or pt.distance(gate) < 6:
+        if pt.distance(built) < 4.5 or pt.distance(track_outer) < 2.5 or pt.distance(gate) < 5 or pt.distance(path) < 1.5 or pt.distance(court) < 1.5:
             continue
         trees.append([round(x, 2), round(y, 2), 0.05, round(rnd.uniform(7.5, 11.0), 2), round(rnd.uniform(2.6, 3.6), 2), 'broad'])
-    for u in np.arange(-L / 2 + 20.0, L / 2 - 19.0, 12.0):
-        for v in (v1 + 18.0,):
-            x, y = F(u, v)
-            if Point(x, y).distance(built) < 4.0:
-                continue
-            trees.append([round(x, 2), round(y, 2), 0.1, round(rnd.uniform(6.5, 8.5), 2), round(rnd.uniform(2.3, 3.0), 2), 'broad'])
-            bx, by = F(u + 4.0, v + 1.5)
-            bench(mb, bx, by, 0.1, ang + math.pi)
+    for u in np.arange(-L / 2 + 14.0, L / 2 - 13.0, 12.0):
+        x, y = F(u, (vy0 + vy1) / 2 - 2.0)
+        trees.append([round(x, 2), round(y, 2), 0.1, round(rnd.uniform(6.5, 8.5), 2), round(rnd.uniform(2.3, 3.0), 2), 'broad'])
+        bx, by = F(u + 4.0, (vy0 + vy1) / 2 - 0.5)
+        bench(mb, bx, by, 0.1, ang + math.pi)
     for k in range(16):
-        x, y = F(rnd.uniform(-L / 2, L / 2), rnd.uniform(v1 + 8.0, v1 + 28.0))
-        if not built.buffer(1.0).contains(Point(x, y)):
-            people.append([round(x, 2), round(y, 2), 0.1, rnd.randrange(6)])
+        x, y = F(rnd.uniform(-L / 2, L / 2), rnd.uniform(vy0 + 2.0, vy1 - 1.0))
+        people.append([round(x, 2), round(y, 2), 0.1, rnd.randrange(6)])
     for k in range(12):
-        x, y = F(rnd.uniform(-30, 30), rnd.uniform(vb + 22, vb + 44))
+        x, y = F(rnd.uniform(-30, 30), rnd.uniform(vt - 12, vt + 12))
         people.append([round(x, 2), round(y, 2), 0.08, rnd.randrange(6)])
     c = main.centroid
     labels.append(dict(x=round(c.x, 2), y=round(c.y, 2), z=H + 5, ru='Школа', tj='Мактаб', kind='school'))

@@ -35,7 +35,7 @@ from shapely.ops import nearest_points, polygonize, unary_union
 sys.path.insert(0, os.path.dirname(__file__))
 import blocks as B  # noqa: E402
 
-E = B.E
+import extract_plan as E  # noqa: E402  (not B.E: run as a script, blocks is not loaded yet)
 LIFT_RED = (0.66, 0.06, 0.01)
 # lift capacities by the length of the car's door wall (as labelled on the sheets)
 LIFT_Q = {'BG': [(2.2, 1000), (1.9, 800), (1.7, 630)], 'A': [(2.5, 1500), (1.7, 800)]}
@@ -381,12 +381,14 @@ def dining(b):
     return dict(type='dining', c=RP(to['c']), w=R(to['L']), d=R(to['W']), a=R(ang(to['u']), 4), chairs=chairs)
 
 
-def raster(o, pts, L, W, flip, step=0.02):
+def raster(o, pts, L, W, flip, step=0.02, scale=(1.0, 1.0)):
+    """the points in o's frame (divided by scale: a block drawn smaller compared at full size)"""
     from scipy import ndimage
     nx, ny = int(L / step) + 1, int(W / step) + 1
     grid = np.zeros((ny, nx), bool)
     for p in pts:
         a, c = local(o, p)
+        a, c = a / scale[0], c / scale[1]
         i, j = int((a * flip[0] + L / 2) / step), int((c * flip[1] + W / 2) / step)
         if 0 <= i < nx and 0 <= j < ny:
             grid[j, i] = True
@@ -407,21 +409,26 @@ def living(b, sheets):
     co = _CANON['o']
     o = obb(b.points())
     L, W = co['L'], co['W']
+    # (the drawings put the same set in at a smaller scale in the smaller living rooms - 0.8 on the
+    # top floors of blocks Б and Г: compared and placed at its own scale)
+    kx, ky = o['L'] / L, o['W'] / W
+    if abs(kx - 1) < 0.03 and abs(ky - 1) < 0.03:
+        kx = ky = 1.0
     ref = raster(co, _CANON['pts'], L, W, (1, 1))
     best = None
     for flip in ((1, 1), (-1, -1), (1, -1), (-1, 1)):
-        g = raster(o, b.points(), L, W, flip)
+        g = raster(o, b.points(), L, W, flip, scale=(kx, ky))
         iou = (g & ref).sum() / max(1, (g | ref).sum())
         if best is None or iou > best[0]:
             best = (iou, flip)
     iou, (sx, sy) = best
-    P = lambda a, c: world(o, a * sx, c * sy)
+    P = lambda a, c: world(o, a * sx * kx, c * sy * ky)
     D = lambda a, c: wdir(o, a * sx, c * sy)
     a0 = R(ang(o['u']), 4)
     out = []
 
     def rect(r):
-        return P((r['x0'] + r['x1']) / 2, (r['y0'] + r['y1']) / 2), r['x1'] - r['x0'], r['y1'] - r['y0']
+        return P((r['x0'] + r['x1']) / 2, (r['y0'] + r['y1']) / 2), (r['x1'] - r['x0']) * kx, (r['y1'] - r['y0']) * ky
     c, w, d = rect(LIVING['rug'])
     out.append(dict(type='rug', c=RP(c), w=R(w), d=R(d), a=a0))
     s, ch = LIVING['sofa'], LIVING['chaise']
@@ -429,7 +436,7 @@ def living(b, sheets):
 
     def add(part, x0, x1, y0, y1, z0, z1):
         cc = P((x0 + x1) / 2, (y0 + y1) / 2)
-        boxes.append([R(cc[0]), R(cc[1]), R(x1 - x0), R(y1 - y0), z0, z1, a0, part])
+        boxes.append([R(cc[0]), R(cc[1]), R((x1 - x0) * kx), R((y1 - y0) * ky), z0, z1, a0, part])
     # the run's seats and the chaise, the back along the run, an arm at each end
     add('seat', s['x0'] + ARM, s['x1'] - ARM, s['y0'], s['y1'] - BACK, 0.0, 0.44)
     add('seat', ch['x0'], s['x1'] - ARM, ch['y0'], s['y0'], 0.0, 0.44)
@@ -440,7 +447,7 @@ def living(b, sheets):
     for cd in LIVING['chairs']:
         cc = P(*cd['c'])
         fd = D(math.cos(math.radians(cd['f'])), math.sin(math.radians(cd['f'])))
-        out.append(dict(type='armchair', c=RP(cc), w=0.72, d=0.74, f=R(ang(fd), 4)))
+        out.append(dict(type='armchair', c=RP(cc), w=R(0.72 * (kx + ky) / 2), d=R(0.74 * (kx + ky) / 2), f=R(ang(fd), 4)))
     for t in LIVING['tables']:
         c, w, d = rect(t)
         out.append(dict(type='ctable', c=RP(c), w=R(w), d=R(d), a=a0, h=t['h']))

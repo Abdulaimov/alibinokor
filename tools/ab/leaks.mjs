@@ -66,7 +66,7 @@ const res = await page.evaluate(async ({ ids, keep }) => {
     lid.rotation.x = -Math.PI / 2;
     lid.position.set((eb.x0 + eb.x1) / 2, H + 0.01, -(eb.y0 + eb.y1) / 2);
     it.group.add(lid);
-    for (const gp of it.gaps.filter((g) => g.done === 'parapet')) {
+    for (const gp of it.gaps.filter((g) => g.done === 'parapet' || g.done === 'railing')) {
       const [[ax, ay], [bx, by]] = [gp.a, gp.b], z0 = 0.98, z1 = H + 0.02;
       const geo = new THREE.BufferGeometry();
       geo.setAttribute('position', new THREE.Float32BufferAttribute([ax, z0, -ay, bx, z0, -by, bx, z1, -by, ax, z0, -ay, bx, z1, -by, ax, z1, -ay], 3));

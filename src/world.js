@@ -55,7 +55,7 @@ function inCorridor(x, z, w, l) {
 /** the city round the complex: quarters of four- to nine-storey blocks on the street grid of the
  * site (turned 27 degrees), with trees along the streets and in the yards; returns the trees */
 // the modelled site in scene metres: the genplan's area and the school's ground (blender/ab)
-const offSite = (p) => (p.x > -237 && p.x < 209 && p.z > -160 && p.z < 132) || (p.x > -190 && p.x < 30 && p.z > -215 && p.z < -30);
+const offSite = (p) => (p.x > -237 && p.x < 209 && p.z > -160 && p.z < 132) || (p.x > -195 && p.x < 30 && p.z > -230 && p.z < -30);
 
 function city(scene) {
   const rnd = rng(31);
