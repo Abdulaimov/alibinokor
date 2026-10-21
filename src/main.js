@@ -7,6 +7,7 @@ import { apartments, aptsOnFloor, summaryOf } from './data.js';
 import { buildWorld } from './world.js';
 import { OUTLINE, loadComplex } from './building.js';
 import { buildFloor } from './floor.js';
+import { KINDS, loadSiteMap, siteWalk } from './sitewalk.js';
 import { WalkControls } from './walk.js';
 import { drawPlan, planTransform } from './plan.js';
 import { Q, setQuality } from './quality.js';
@@ -18,6 +19,8 @@ import { L, getLang, num, setLang } from './i18n.js';
 const $ = (s) => document.querySelector(s);
 const ACCENT = 0xc8955a;
 
+let walkInterior = null; // the flat walked through, or the ground (sitewalk.js); declared up here: the wording reads it
+
 // ---------- static wording ----------
 function applyStatic() {
   document.querySelectorAll('[data-t]').forEach((el) => {
@@ -25,7 +28,8 @@ function applyStatic() {
     if (typeof v === 'string') el.textContent = v;
   });
   document.querySelectorAll('.lang button').forEach((b) => b.classList.toggle('on', b.dataset.lang === getLang()));
-  $('#walk-help').innerHTML = L().walkHelp;
+  $('#walk-help').innerHTML = walkInterior?.outdoor ? L().walkHelpSite : L().walkHelp;
+  $('#exit-walk').textContent = walkInterior?.outdoor ? L().exitSiteWalk : L().exitWalk;
   const q = $('#quality');
   q.textContent = L().quality(Q.level === 'high');
   q.title = L().qualityTitle(Q.level === 'high');
@@ -40,7 +44,7 @@ document.querySelector('.lang').addEventListener('click', (e) => {
   buildPlaces();
   buildLabels();
   refresh();
-  if (state.mode === 'walk' && walkInterior) setWalkTitle(walkInterior.apt);
+  if (state.mode === 'walk' && walkInterior) walkInterior.outdoor ? ($('#walk-title').innerHTML = L().siteWalkTitle) : setWalkTitle(walkInterior.apt);
 });
 
 // ---------- renderer / scene ----------
@@ -136,7 +140,6 @@ const state = {
   filter: { rooms: 0 },
 };
 let dollhouse = [];
-let walkInterior = null;
 let lastInteraction = performance.now();
 
 const isOpen = (a) => a.tower === state.tower && a.floor === state.floor;
@@ -463,6 +466,7 @@ function renderSide() {
         <div class="stat"><b>${num(Math.round(Math.min(...areas)))}–${num(Math.round(Math.max(...areas)))}</b><span>${T.stat2}</span></div>
         <div class="stat"><b>${Math.min(...RESIDENTIAL.map((t) => t.levels))}–${Math.max(...RESIDENTIAL.map((t) => t.levels))}</b><span>${T.stat3}</span></div>
       </div>
+      <button class="btn site-walk" data-act="sitewalk">${T.siteWalk}</button>
       ${roomFilter(apartments)}
       <div class="note">${T.chooseNote}</div>
       <div class="label">${T.nearby}</div>
@@ -482,6 +486,7 @@ function renderSide() {
         <div class="stat"><b>${num(Math.round(Math.min(...areas)))}–${num(Math.round(Math.max(...areas)))}</b><span>${T.stat2}</span></div>
         <div class="stat"><b>${t.levels}</b><span>${T.stat3}</span></div>
       </div>
+      <button class="btn site-walk" data-act="sitewalk" data-from="${t.key}">${T.siteWalkBlock(LETTER[t.key])}</button>
       ${roomFilter(list)}
       <div class="note">${T.blockNote}</div>`;
   } else if (state.mode === 'floor' && !state.apt) {
@@ -562,6 +567,7 @@ $('#side').addEventListener('click', (e) => {
   else if (b.dataset.act === 'block') selectBlock(state.tower);
   else if (b.dataset.act === 'floor') selectFloor(state.tower, state.floor);
   else if (b.dataset.act === 'walk') enterWalk(state.apt);
+  else if (b.dataset.act === 'sitewalk') enterSiteWalk(b.dataset.from ?? null);
   else if (b.dataset.act === 'zoom') openPlan(state.apt);
   else if (b.dataset.act === 'request') toast(L().contactToast);
   else if (b.dataset.apt) selectApt(apartments.find((a) => a.id === b.dataset.apt));
@@ -702,6 +708,101 @@ function enterWalk(a) {
   });
 }
 
+// On the ground round the complex: the walk of src/sitewalk.js on the map of the ground the Blender
+// build writes (what is underfoot, what one cannot walk through). Outdoors light as it is; the sun's
+// shadow drawn finer round the walker, following them.
+let sunSaved = null, sunAt = null;
+async function enterSiteWalk(from = null) {
+  if (!building || state.mode === 'walk') return;
+  let map;
+  try {
+    const slow = setTimeout(() => toast(L().siteLoading), 250);
+    map = await loadSiteMap();
+    clearTimeout(slow);
+  } catch (err) {
+    console.error(err);
+    toast(L().loadFailed);
+    return;
+  }
+  shadowsDirty();
+  fade(() => {
+    clearDollhouse();
+    building.showAll();
+    labelsEl.innerHTML = '';
+    labels = [];
+    liftLabels = [];
+    walkInterior = siteWalk(map, from, blockPicks);
+    placesEl.style.display = 'none';
+    tooltip.style.opacity = 0;
+    Object.assign(state, { mode: 'walk', apt: null, hoverApt: null, hoverFloor: null });
+    updateOverlays();
+    tween = null;
+    controls.enabled = false;
+    controls.autoRotate = false;
+    camera.fov = 64;
+    camera.near = 0.1;
+    frameCentre();
+    camera.updateProjectionMatrix();
+    walk.start(walkInterior, scene);
+    // the sun's shadow: 160 m round the walker instead of the whole complex
+    const sun = world.sun, sc = sun.shadow.camera;
+    sunSaved = { cam: [sc.left, sc.right, sc.top, sc.bottom], pos: sun.position.clone(), target: sun.target.position.clone() };
+    [sc.left, sc.right, sc.top, sc.bottom] = [-80, 80, 80, -80];
+    sc.updateProjectionMatrix();
+    sunAt = null;
+    followSun();
+    $('#ext-ui').hidden = true;
+    $('#walk-ui').hidden = false;
+    document.body.classList.add('walking');
+    $('#walk-title').innerHTML = L().siteWalkTitle;
+    applyStatic();
+    prepareSiteMinimap(map);
+  });
+}
+// keep the sun's finer shadow round the walker (redrawn when they have gone 30 m)
+function followSun() {
+  if (!sunSaved || !walkInterior?.outdoor) return;
+  const p = walk.pos;
+  if (sunAt && Math.hypot(p.x - sunAt.x, p.y - sunAt.y) < 30) return;
+  sunAt = p.clone();
+  const sun = world.sun;
+  const off = sunSaved.pos.clone().sub(sunSaved.target);
+  sun.target.position.set(p.x, 0, p.y);
+  sun.position.copy(sun.target.position).add(off);
+  sun.target.updateMatrixWorld();
+  shadowsDirty();
+}
+function exitSiteWalk() {
+  shadowsDirty();
+  fade(() => {
+    walk.stop();
+    walkInterior = null;
+    const sun = world.sun, sc = sun.shadow.camera;
+    if (sunSaved) {
+      [sc.left, sc.right, sc.top, sc.bottom] = sunSaved.cam;
+      sc.updateProjectionMatrix();
+      sun.position.copy(sunSaved.pos);
+      sun.target.position.copy(sunSaved.target);
+      sun.target.updateMatrixWorld();
+      sunSaved = null;
+    }
+    camera.fov = 38;
+    camera.near = 1;
+    camera.updateProjectionMatrix();
+    controls.enabled = true;
+    $('#ext-ui').hidden = false;
+    $('#walk-ui').hidden = true;
+    document.body.classList.remove('walking');
+    applyStatic();
+    state.mode = 'overview';
+    frameCentre();
+    camera.updateProjectionMatrix();
+    camera.position.copy(home().pos);
+    controls.target.copy(home().target);
+    goOverview();
+  });
+}
+
 // Indoors: a studio-like environment instead of the sky, the sun's shadow pulled in round the flat.
 let roomEnv = null, outdoor = null, bounce = null;
 function lightInterior(interior) {
@@ -736,6 +837,7 @@ function lightInterior(interior) {
 }
 
 function exitWalk() {
+  if (walkInterior?.outdoor) return exitSiteWalk();
   shadowsDirty();
   const a = walkInterior.apt;
   fade(() => {
@@ -785,7 +887,88 @@ function prepareMinimap(a) {
   miniBg = off;
   miniT = planTransform(a, mini.clientWidth, mini.clientHeight, 6);
 }
+// the site's mini-map: the ground under the walker (1 m grid), buildings and fences, north up,
+// 70 x 45 m round the walker
+let siteMini = null;
+function prepareSiteMinimap(map) {
+  const s = 3; // px per metre on the prepared map
+  const c = document.createElement('canvas');
+  c.width = map.nx * s;
+  c.height = map.ny * s;
+  const g = c.getContext('2d');
+  const ground = Uint8Array.from(atob(map.ground), (ch) => ch.charCodeAt(0));
+  const img = g.createImageData(map.nx, map.ny);
+  const rgb = Object.fromEntries(Object.entries(KINDS).map(([k, v]) => [k, new THREE.Color(v.c)]));
+  for (let j = 0; j < map.ny; j++) {
+    for (let i = 0; i < map.nx; i++) {
+      const col = rgb[ground[j * map.nx + i]] ?? rgb[0], o = ((map.ny - 1 - j) * map.nx + i) * 4;
+      img.data[o] = col.r * 255;
+      img.data[o + 1] = col.g * 255;
+      img.data[o + 2] = col.b * 255;
+      img.data[o + 3] = 255;
+    }
+  }
+  const small = document.createElement('canvas');
+  small.width = map.nx;
+  small.height = map.ny;
+  small.getContext('2d').putImageData(img, 0, 0);
+  g.imageSmoothingEnabled = false;
+  g.drawImage(small, 0, 0, c.width, c.height);
+  const P = (x, y) => [(x - map.x0) * s, (map.y0 + map.ny - y) * s];
+  g.fillStyle = '#6f6862';
+  for (const poly of map.solids) {
+    g.beginPath();
+    poly.forEach(([x, y], i) => (i ? g.lineTo(...P(x, y)) : g.moveTo(...P(x, y))));
+    g.closePath();
+    g.fill();
+  }
+  g.strokeStyle = '#2e4b3a';
+  g.lineWidth = 1.2;
+  for (const [, pts] of map.lines) {
+    g.beginPath();
+    pts.forEach(([x, y], i) => (i ? g.lineTo(...P(x, y)) : g.moveTo(...P(x, y))));
+    g.stroke();
+  }
+  siteMini = { c, s, map };
+  miniBg = null;
+}
+function drawSiteMinimap() {
+  const dpr = Math.min(devicePixelRatio || 1, 2);
+  const w = mini.clientWidth, h = mini.clientHeight;
+  if (mini.width !== Math.round(w * dpr)) {
+    mini.width = Math.round(w * dpr);
+    mini.height = Math.round(h * dpr);
+  }
+  const { c, s, map } = siteMini;
+  const g = mini.getContext('2d');
+  g.setTransform(dpr, 0, 0, dpr, 0, 0);
+  g.clearRect(0, 0, w, h);
+  const st = walk.localState();
+  const k = 2.2 / s; // px per map px
+  const cx = (st.x - map.x0) * s, cy = (map.y0 + map.ny - st.y) * s;
+  g.save();
+  g.beginPath();
+  g.roundRect?.(0, 0, w, h, 8);
+  g.clip();
+  g.drawImage(c, cx - w / 2 / k, cy - h / 2 / k, w / k, h / k, 0, 0, w, h);
+  g.restore();
+  const ang = Math.atan2(-st.dy, st.dx);
+  g.fillStyle = 'rgba(200, 149, 90, 0.35)';
+  g.beginPath();
+  g.moveTo(w / 2, h / 2);
+  g.arc(w / 2, h / 2, 28, ang - 0.6, ang + 0.6);
+  g.closePath();
+  g.fill();
+  g.fillStyle = '#9a6a3c';
+  g.strokeStyle = '#fff';
+  g.lineWidth = 2;
+  g.beginPath();
+  g.arc(w / 2, h / 2, 5, 0, Math.PI * 2);
+  g.fill();
+  g.stroke();
+}
 function drawMinimap() {
+  if (walkInterior?.outdoor && siteMini && walk.enabled) return drawSiteMinimap();
   if (!miniBg || !walk.enabled) return;
   const dpr = Math.min(devicePixelRatio || 1, 2);
   const w = mini.clientWidth, h = mini.clientHeight;
@@ -960,6 +1143,7 @@ renderer.setAnimationLoop(() => {
   }
   if (state.mode === 'walk') {
     walk.update(dt);
+    followSun();
     drawMinimap();
   } else {
     controls.autoRotate = state.mode === 'overview' && performance.now() - lastInteraction > 25000;
@@ -989,7 +1173,7 @@ window.__app = {
   THREE, scene, camera, controls, renderer, state, walk, apartments, pipeline, world, quality: Q,
   get building() { return building; },
   get interior() { return walkInterior; },
-  selectBlock, selectFloor, selectApt, enterWalk, exitWalk, goOverview,
+  selectBlock, selectFloor, selectApt, enterWalk, exitWalk, goOverview, enterSiteWalk,
   setView(pos, target) {
     tween = null;
     camera.position.set(...pos);

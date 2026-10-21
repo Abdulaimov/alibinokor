@@ -21,6 +21,23 @@ from shapely.ops import unary_union
 from .config import SPREAD
 
 
+# What the walk on the ground (src/sitewalk.js) must not pass through, filled by the builders:
+# solids: outlines (buildings, play equipment, benches...), lines: [width, points] (fences),
+# posts: [x, y, r] (masts, columns), surf: [kind, polygon] (the ground the walker stands on)
+WALK = dict(solids=[], lines=[], posts=[], surf=[])
+
+
+# the lamps' heads, for the site at night (src/night.js): [x, y, z, aim x, aim y, kind]; kind 0 a
+# path lamp shining down, 1 a street lamp on its arm, 2 a floodlight aimed at the pitch
+LIGHTS = []
+
+
+def walk_reset():
+    for v in WALK.values():
+        v.clear()
+    LIGHTS.clear()
+
+
 def parts(g):
     if g is None or g.is_empty:
         return []
@@ -137,6 +154,7 @@ MAKTAB = [(-116.1, 38.2), (-2.7, 66.6), (-8.5, 90.0), (-122.0, 61.7)]
 
 def bench(mb, x, y, z, rot):
     ca, sa = math.cos(rot), math.sin(rot)
+    WALK['solids'].append(affinity.rotate(box(x - 0.95, y - 0.3, x + 0.95, y + 0.3), rot, origin=(x, y), use_radians=True))
     mb.box(x, y, z + 0.42, 1.8, 0.45, 0.06, 'Wood', rot=rot)
     mb.box(x - sa * 0.22, y + ca * 0.22, z + 0.48, 1.8, 0.06, 0.42, 'Wood', rot=rot)
     for e in (-0.75, 0.75):
@@ -251,6 +269,12 @@ def school(mb, labels, plot, rnd, people):
 
     # ---- the ground ----
     built = unary_union([main, gym, hall, lobby])
+    WALK['solids'].extend([main.buffer(0.7, join_style='mitre'), gym, hall, lobby.buffer(0.1, join_style='mitre')])
+    for u in (-L / 3, L / 3):
+        WALK['solids'].append(F.rect(u - 3.3, v0 - 0.7, u + 3.3, v0 + 0.2))
+    for u in (-10.2, -3.4, 3.4, 10.2):
+        x, y = F(u, vs - 3.9)
+        WALK['posts'].append([x, y, 0.15])
     ground = F.rect(-L / 2 - 8.0, vf, L / 2 + 8.0, vf + DEPTH)
     mb.polygon_face(ground.difference(built.buffer(0.02)), 0.05, 'Lawn')
     yard = F.rect(-L / 2 - 8.0, vy0, L / 2 + 8.0, vy1 + 0.0).union(F.rect(-L / 2 - 8.0, vy1, L / 2 + 8.0, v0)).difference(built.buffer(0.02))
@@ -259,6 +283,7 @@ def school(mb, labels, plot, rnd, people):
     gate = Point(F(-L / 2 - 1.0, vf))
     path = F.rect(-L / 2 - 3.5, vf, -L / 2 + 1.5, vy0 + 0.5)
     mb.polygon_face(path, 0.1, 'Paving')
+    WALK['surf'] += [['school_lawn', ground], ['school_paving', unary_union([yard, path])]]
     # the sports ground: a 200 m track round a pitch, a court at its east end
     def stadium(half_len, r):
         return unary_union([F.rect(-half_len, vt - r, half_len, vt + r),
@@ -271,14 +296,17 @@ def school(mb, labels, plot, rnd, people):
         c2 = list(ln.coords)[:-1]
         mb.tube(c2, [0.085] * len(c2), [0.095] * len(c2), 0.06, 'Road line', closed=True)
     pitch_lines(mb, F, 0.0, vt, 52.0, 32.0, 0.085, goals=True)
+    WALK['surf'] += [['track', track_outer.difference(track_inner)], ['pitch', track_inner]]
     cu0, cu1 = 57.0, min(L / 2 + 7.0, 72.0)
     court = F.rect(cu0, vt - 14.0, cu1, vt + 14.0)
     if not court.intersects(track_outer.buffer(1.5)):
         mb.polygon_face(court, 0.08, 'School teal')
         mb.polygon_face(court.buffer(-1.0), 0.1, 'Court blue')
         cm = (cu0 + cu1) / 2
+        WALK['surf'].append(['track', court])
         for sv in (-1, 1):
             x, y = F(cm, vt + sv * 13.0)
+            WALK['posts'].append([x, y, 0.12])
             cyl(mb, x, y, 0.08, 3.05, 0.06, 'Metal', n=8)
             F.box(mb, cm, vt + sv * 12.55, 2.9, 1.8, 0.05, 1.05, 'Frame light')
     # the fence, the gate on the plot's side
@@ -290,6 +318,7 @@ def school(mb, labels, plot, rnd, people):
             if p.is_empty or p.length < 0.5:
                 continue
             c2 = list(p.coords)
+            WALK['lines'].append([0.08, c2])
             mb.ribbon(c2, 0.08, 1.9, 'Pitch fence', double=True)
             mb.tube(c2, [1.86] * len(c2), [1.92] * len(c2), 0.05, 'Fence')
             for q in [p.interpolate(t) for t in np.arange(0.0, p.length + 0.01, 2.5)]:
@@ -429,6 +458,7 @@ def mini_pitch(mb, fit, plot, keep_off, rnd, people):
         mb.polygon_face(F.rect(u0, -hv, u1, hv), z, 'Turf light' if k % 2 else 'Turf')
     raised_edge = fence.buffer(0.15, join_style='mitre').difference(fence)
     mb.prism(raised_edge, 0.0, z + 0.05, 'Kerb', 'Kerb')
+    WALK['surf'].append(['pitch', fence])
     gw, gh = 3.0, 2.0
     pitch_lines(mb, F, 0.0, 0.0, Lp, Wp, z + 0.002, goals=True, circle=3.0, area=(min(6.0, Lp * 0.2), min(Wp - 2.0, 12.0)), goal_w=gw)
     # penalty spots at 6 m
@@ -447,6 +477,7 @@ def mini_pitch(mb, fit, plot, keep_off, rnd, people):
             if p.is_empty or p.length < 0.3:
                 continue
             c2 = list(p.coords)
+            WALK['lines'].append([0.1, c2])
             mb.ribbon(c2, z, z + 4.0, 'Pitch fence', double=True)
             mb.tube(c2, [z + 3.95] * len(c2), [z + 4.05] * len(c2), 0.06, 'Fence')
             mb.tube(c2, [z + 0.95] * len(c2), [z + 1.02] * len(c2), 0.05, 'Fence')
@@ -458,18 +489,22 @@ def mini_pitch(mb, fit, plot, keep_off, rnd, people):
     # floodlights: four masts outside the corners, two lamps each, aimed at the pitch
     for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
         x, y = F(su * (hu + 2.3), sv * (hv + 2.3))
+        WALK['posts'].append([x, y, 0.12])
         cyl(mb, x, y, 0.0, 9.0, 0.09, 'Lamp dark', n=8)
         a2 = math.atan2(-(y - F(0, 0)[1]), -(x - F(0, 0)[0]))
         for k in (-0.35, 0.35):
             hx, hy = x + math.cos(a2) * 0.5 - math.sin(a2) * k, y + math.sin(a2) * 0.5 + math.cos(a2) * k
             mb.box(hx, hy, 8.65, 0.55, 0.5, 0.32, 'Lamp dark', rot=a2)
             mb.box(hx + math.cos(a2) * 0.28, hy + math.sin(a2) * 0.28, 8.68, 0.04, 0.42, 0.26, 'Lamp glow', rot=a2)
+            LIGHTS.append([round(hx + math.cos(a2) * 0.3, 2), round(hy + math.sin(a2) * 0.3, 2), 8.68,
+                           round(F(0, 0)[0], 2), round(F(0, 0)[1], 2), 2])
         bar(mb, (x, y), (x + math.cos(a2) * 0.5, y + math.sin(a2) * 0.5), 8.8, 8.8, 0.08, 'Lamp dark')
     # team benches under clear roofs on the long side away from the gate
     for su in (-1, 1):
         u = su * min(6.5, hu * 0.4)
         x, y = F(u, hv + 0.6)
         F2 = Frame(x, y, ang)
+        WALK['solids'].append(F2.rect(-1.95, -0.6, 1.95, 0.5))
         F2.box(mb, 0.0, 0.0, 0.0, 3.6, 0.45, 0.45, 'Wood')
         F2.box(mb, 0.0, 0.25, 0.45, 3.6, 0.06, 0.4, 'Wood')
         for e in (-1.7, 1.7):
@@ -666,6 +701,7 @@ def playground(mb, poly, z, rnd, people, fence=True):
             if not poly.buffer(-0.3).contains(zone) or any(zone.intersects(q) for q in zones):
                 continue
             zones.append(zone)
+            WALK['solids'].append(zone.buffer(-0.45 if min(su, sv) > 2.5 else -0.15, join_style='mitre'))
             placed.append(p)
             Fz = Frame(p[0], p[1], ang)
             col = [PLAY[(len(placed) + k) % len(PLAY)] for k in range(5)]
@@ -706,6 +742,7 @@ def playground(mb, poly, z, rnd, people, fence=True):
             line = [ring.interpolate(s) for s in np.arange(t, seg_end + 0.01, 0.5)]
             if len(line) >= 2:
                 c2 = [(q.x, q.y) for q in line]
+                WALK['lines'].append([0.1, c2])
                 mb.tube(c2, [z + 0.55] * len(c2), [z + 0.6] * len(c2), 0.04, 'Metal')
             t = seg_end + 1.6
     return placed
@@ -743,6 +780,7 @@ def kindergarten(mb, wings, labels, rnd):
     for wi, w in enumerate(shapes):
         mb.prism(w.buffer(0.03, join_style='mitre'), 0.0, 0.6, 'School plinth')
         block(mb, w, 0.0, H, 'Kinder render', 'Kinder render')
+        WALK['solids'].append(w.buffer(0.25, join_style='mitre'))
         band = w.buffer(0.06, join_style='mitre').difference(w.buffer(-0.2, join_style='mitre'))
         mb.prism(band, H - 0.9, H - 0.25, cols[wi % 4], cols[wi % 4])
         for k, (a, b) in enumerate(ring_edges(w)):
@@ -755,6 +793,7 @@ def kindergarten(mb, wings, labels, rnd):
     hall = hexa.difference(u.buffer(0.2))
     for q in parts(hall):
         if q.area > 6:
+            WALK['solids'].append(q)
             mb.prism(q, 0.0, 4.4, 'Shop glass', 'Stone white')
             mb.prism(q.buffer(0.15, join_style='mitre').difference(q), 4.4, 4.8, 'Stone white', 'Stone white')
     labels.append(dict(x=round(c.x, 2), y=round(c.y, 2), z=H + 3, ru='Детский сад на 300 мест', tj='Боғчаи кӯдакона барои 300 ҷой', kind='kindergarten'))
@@ -772,6 +811,7 @@ def veranda(mb, poly, rnd):
         e1, e2 = e2, e1
     L, W = math.hypot(*e1), math.hypot(*e2)
     F = Frame(r.centroid.x, r.centroid.y, math.atan2(e1[1], e1[0]))
+    WALK['solids'].append(F.rect(-L / 2 - 0.05, -W / 2 - 0.05, L / 2 + 0.05, W / 2 + 0.05))
     F.box(mb, 0.0, 0.0, 0.12, L, W, 0.12, 'Wood')
     for su, sv in ((-1, -1), (1, -1), (1, 1), (-1, 1)):
         x, y = F(su * (L / 2 - 0.2), sv * (W / 2 - 0.2))
@@ -826,6 +866,7 @@ def plantings(mb, lawn, avoid, rnd, z):
                 r = rnd.uniform(1.1, 1.7)
                 pts = [(p.x + r * math.cos(a), p.y + r * math.sin(a)) for a in np.linspace(0, 2 * math.pi, 20, endpoint=False)]
                 mb.polygon_face(Polygon(pts), z + 0.03, 'Mulch')
+                WALK['posts'].append([p.x, p.y, r + 0.1])
                 mb.tube(pts, [z] * 20, [z + 0.12] * 20, 0.1, 'Kerb', closed=True)
                 cA, cB = rnd.sample(['Flowers red', 'Flowers yellow', 'Flowers violet', 'Flowers white'], 2)
                 for j in range(int(r * 9)):

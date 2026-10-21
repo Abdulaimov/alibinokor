@@ -18,4 +18,5 @@ GT=(npx --yes @gltf-transform/cli@4.1.1)
 rm -f "$OUT.dedup.glb" "$OUT.weld.glb"
 cp "$OUT.json" src/model/complex.json
 cp "$OUT.plans.json" src/model/plans.json
-ls -la public/models/ali_binokor.glb src/model/complex.json src/model/plans.json
+cp "$OUT.walk.json" public/models/site_walk.json   # the ground for the walk on the site (src/sitewalk.js)
+ls -la public/models/ali_binokor.glb public/models/site_walk.json src/model/complex.json src/model/plans.json

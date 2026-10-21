@@ -1,4 +1,4 @@
-// First-person walking inside an apartment.
+// First-person walking inside an apartment, or on the ground round the complex (src/sitewalk.js).
 // Drag to look, click the floor to walk there, WASD/arrows, or the on-screen joystick on touch screens.
 import * as THREE from 'three';
 
@@ -43,8 +43,10 @@ export class WalkControls {
     const { spawn } = interior;
     this.pos.set(spawn.x, spawn.z);
     this.yaw = spawn.yaw;
-    this.pitch = -0.08;
+    this.pitch = spawn.pitch ?? -0.08;
     this.target = null;
+    this.path = null;
+    this.base = interior.groundAt ? interior.groundAt(spawn.x, spawn.z) : interior.baseY;
     scene.add(this.ring);
     this.apply(0);
   }
@@ -66,6 +68,7 @@ export class WalkControls {
     const r = this.dom.getBoundingClientRect();
     this.ndc.set(((e.clientX - r.left) / r.width) * 2 - 1, -((e.clientY - r.top) / r.height) * 2 + 1);
     this.ray.setFromCamera(this.ndc, this.camera);
+    if (this.interior.pick) return this.interior.pick(this.ray);
     const hit = this.ray.intersectObject(this.interior.group, true)[0];
     if (!hit || !this.interior.floorMeshes.includes(hit.object)) return null;
     return hit.point;
@@ -95,7 +98,11 @@ export class WalkControls {
     if (e.pointerType === 'touch') return;
     const p = this.floorHit(e);
     this.ring.visible = !!p;
-    if (p) this.ring.position.set(p.x, p.y + 0.01, p.z);
+    if (p) {
+      this.ring.position.set(p.x, p.y + 0.01, p.z);
+      // far off on the grounds the ring grows so it stays visible
+      this.ring.scale.setScalar(this.interior.outdoor ? Math.max(1, this.camera.position.distanceTo(p) / 7) : 1);
+    }
   }
 
   onUp(e) {
@@ -105,7 +112,10 @@ export class WalkControls {
     if (wasDrag) return;
     const p = this.floorHit(e);
     if (p) {
-      this.target = new THREE.Vector2(p.x, p.z);
+      // outdoors the way goes round hedges, fences and benches; indoors straight to the point
+      const way = this.interior.route?.(this.pos.x, this.pos.y, p.x, p.z);
+      this.path = way?.length ? way : null;
+      this.target = this.path ? this.path.shift() : new THREE.Vector2(p.x, p.z);
       this.stuck = 0;
     }
   }
@@ -114,7 +124,8 @@ export class WalkControls {
     if (!this.enabled) return;
     const k = this.keys;
     const run = k.has('ShiftLeft') || k.has('ShiftRight');
-    const speed = run ? 3.2 : 1.7;
+    const pace = this.interior.speed ?? 1;
+    const speed = (run ? 3.2 : 1.7) * pace;
     let fwd = 0, side = 0, turn = 0;
     if (k.has('KeyW') || k.has('ArrowUp')) fwd += 1;
     if (k.has('KeyS') || k.has('ArrowDown')) fwd -= 1;
@@ -129,6 +140,7 @@ export class WalkControls {
     let mx = 0, mz = 0;
     if (fwd || side) {
       this.target = null;
+      this.path = null;
       const len = Math.min(1, Math.hypot(fwd, side));
       const a = Math.atan2(side, fwd);
       const fx = -Math.sin(this.yaw), fz = -Math.cos(this.yaw);
@@ -139,11 +151,18 @@ export class WalkControls {
     } else if (this.target) {
       const dx = this.target.x - this.pos.x, dz = this.target.y - this.pos.y;
       const dist = Math.hypot(dx, dz);
-      if (dist < 0.05) this.target = null;
+      const last = !this.path?.length;
+      if (dist < (last ? 0.05 : 0.35)) this.target = last ? null : this.path.shift();
       else {
-        const step = Math.min(dist, 2.2 * Math.min(1, dist * 1.5 + 0.3) * dt);
+        const step = Math.min(dist, 2.2 * pace * (last ? Math.min(1, dist * 1.5 + 0.3) : 1) * dt);
         mx = (dx / dist) * step;
         mz = (dz / dist) * step;
+        // outdoors the walker turns to face the way, unless looking round with the pointer
+        if (this.interior.outdoor && !this.drag?.moved && dist > 0.6) {
+          let d = Math.atan2(-dx, -dz) - this.yaw;
+          d = Math.atan2(Math.sin(d), Math.cos(d));
+          this.yaw += d * Math.min(1, dt * 2.5);
+        }
       }
     }
 
@@ -156,15 +175,20 @@ export class WalkControls {
       if (this.target) {
         // give up on click-to-walk if furniture blocks the way
         this.stuck = moved < Math.hypot(mx, mz) * 0.3 ? (this.stuck ?? 0) + dt : 0;
-        if (this.stuck > 0.25) this.target = null;
+        if (this.stuck > 0.25) (this.target = null), (this.path = null);
       }
     }
     this.apply(dt);
   }
 
-  apply() {
+  apply(dt = 0) {
     const bob = Math.sin(this.bob) * 0.012;
-    this.camera.position.set(this.pos.x, this.interior.baseY + EYE + bob, this.pos.y);
+    // outdoors the ground's level under the walker (kerbs, the road a step down), eased in
+    if (this.interior.groundAt) {
+      const h = this.interior.groundAt(this.pos.x, this.pos.y);
+      this.base += (h - this.base) * Math.min(1, dt * 8);
+    } else this.base = this.interior.baseY;
+    this.camera.position.set(this.pos.x, this.base + EYE + bob, this.pos.y);
     this.camera.rotation.set(this.pitch, this.yaw, 0, 'YXZ');
   }
 

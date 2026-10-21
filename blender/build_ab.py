@@ -187,12 +187,15 @@ def main():
     bpy.ops.wm.save_as_mainfile(filepath=out + '.blend', compress=True)
     used = sorted({fl['plan'] for t in towers for fl in t['floors']})
     keep = ('title', 'slab', 'enclosure', 'walls', 'struct', 'windows', 'glazing', 'common', 'apartments', 'lifts', 'swings')
+    if site and site.get('walk'):
+        with open(out + '.walk.json', 'w') as f:
+            json.dump(site['walk'], f, separators=(',', ':'))
     with open(out + '.plans.json', 'w') as f:
         json.dump({k: {kk: plans[k][kk] for kk in keep if kk in plans[k]} for k in used}, f, separators=(',', ':'), ensure_ascii=False)
     info = dict(site_centre=[0.0, 0.0], towers=towers, people=podium.PEOPLE + (site['people'] if site else []),
                 trees_placed=(geom.TREE_LOG or []) + podium.TREES + (site['trees'] if site else []),
                 tree_protos=[], trees=[], cars=site['cars'] if site else [], benches=[],
-                labels=site['labels'] if site else [])
+                labels=site['labels'] if site else [], lamps=site['lamps'] if site else [])
     with open(out + '.json', 'w') as f:
         json.dump(info, f, ensure_ascii=False)
     if not args.no_glb:

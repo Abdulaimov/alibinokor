@@ -8,6 +8,7 @@ Levels: roads at 0, paving +0.12, lawns +0.15 behind a kerb, play surfaces +0.13
 import math
 import random
 
+from shapely import affinity
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
 
@@ -110,19 +111,24 @@ def grate(mb, x, y, z, rot):
 
 
 def lamp(mb, x, y, z, h=4.5, street=False, rot=0.0):
+    LS.WALK['posts'].append([x, y, 0.12])
     mb.box(x, y, z, 0.14, 0.14, h, 'Lamp dark')
     if street:
         ca, sa = math.cos(rot), math.sin(rot)
         mb.box(x + ca * 0.9, y + sa * 0.9, z + h - 0.1, 1.8, 0.12, 0.1, 'Lamp dark', rot=rot)
         mb.box(x + ca * 1.7, y + sa * 1.7, z + h - 0.22, 0.6, 0.28, 0.14, 'Lamp dark', rot=rot)
         mb.box(x + ca * 1.7, y + sa * 1.7, z + h - 0.24, 0.5, 0.22, 0.03, 'Lamp glow', rot=rot)
+        hx, hy = x + ca * 1.7, y + sa * 1.7
+        LS.LIGHTS.append([round(hx, 2), round(hy, 2), round(z + h - 0.25, 2), round(hx, 2), round(hy, 2), 1])
     else:
         mb.box(x, y, z + h, 0.42, 0.42, 0.08, 'Lamp dark')
         mb.box(x, y, z + h - 0.35, 0.3, 0.3, 0.35, 'Lamp glow')
+        LS.LIGHTS.append([round(x, 2), round(y, 2), round(z + h - 0.18, 2), round(x, 2), round(y, 2), 0])
 
 
 def bench(mb, x, y, z, rot):
     ca, sa = math.cos(rot), math.sin(rot)
+    LS.WALK['solids'].append(affinity.rotate(box(x - 0.95, y - 0.3, x + 0.95, y + 0.3), rot, origin=(x, y), use_radians=True))
     mb.box(x, y, z + 0.42, 1.8, 0.45, 0.06, 'Wood', rot=rot)
     mb.box(x - sa * 0.22, y + ca * 0.22, z + 0.48, 1.8, 0.06, 0.42, 'Wood', rot=rot)
     for e in (-0.75, 0.75):
@@ -232,6 +238,7 @@ def hospital(mb, poly, labels):
 # ----------------------------------------------------------------------------
 
 def build_site(mats, col, towers, pods):
+    LS.walk_reset()
     raw = site_raw()
     rnd = random.Random(20261020)
     plot = Polygon(raw['plot']).buffer(0)
@@ -490,6 +497,7 @@ def build_site(mats, col, towers, pods):
             if l.geom_type != 'LineString' or l.length < 3:
                 continue
             c = list(l.coords)
+            LS.WALK['lines'].append([0.8, c])
             mb.tube(c, [Z['lawn']] * len(c), [Z['lawn'] + 0.9] * len(c), 0.8, 'Shrub')
 
     # car parks at the "8" marks
@@ -616,4 +624,209 @@ def build_site(mats, col, towers, pods):
 
     om = mb.to_mesh('Site props', mats)
     make_object('Site props', om, col)
-    return dict(trees=trees, cars=cars, people=people, labels=labels)
+    walk = walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hosp, raw, houses, trees, planted, cars, people, school_fp)
+    return dict(trees=trees, cars=cars, people=people, labels=labels, walk=walk, lamps=[list(l) for l in LS.LIGHTS])
+
+
+def walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hosp, raw, houses, trees, planted, cars, people, school_ground):
+    """The ground for walking on (src/sitewalk.js), site metres: what is underfoot on a 1 m grid
+    (kinds: 0 no way, 1 asphalt, 2 paving, 3 lawn, 4 play surface, 5 pitch, 6 school lawn,
+    7 school paving, 8 track, 9 bare ground), the outlines one cannot walk through (buildings, play
+    equipment, benches, cars...), fences and hedges as lines, masts, lamps and trunks as posts, and
+    where the walk begins (the courtyard entrance between blocks Б and В, and one at each block)."""
+    import base64
+    import numpy as np
+    import shapely
+    W = LS.WALK
+    R1 = lambda v: round(float(v), 2)
+    ring = lambda g, tol=0.05: [[R1(x), R1(y)] for x, y in list(g.simplify(tol, preserve_topology=True).exterior.coords)[:-1]]
+    solids = []
+    def solid(g, tol=0.05):
+        for q in parts(g):
+            if q.area > 0.05:
+                solids.append(ring(q, tol))
+    solid(built.buffer(0.35, join_style='mitre'), 0.1)   # shop windows: a step back from the glass
+    if kinder is not None:
+        solid(kinder.buffer(0.2, join_style='mitre'))
+    for g in hosp:
+        solid(g.minimum_rotated_rectangle.buffer(0.3, join_style='mitre'))
+    for g in blue:
+        if g in hosp or not g.within(plot.buffer(1)) or g.area > 400:
+            continue
+        solid(g.minimum_rotated_rectangle.buffer(0.35, join_style='mitre'))
+    for w in raw['words']:
+        if w['t'] in ('ПС', '6'):
+            x, y = w['p']
+            sx, sy = (9.0, 6.0) if w['t'] == 'ПС' else (5.0, 4.0)
+            solid(affinity.rotate(box(x - sx / 2, y - sy / 2, x + sx / 2, y + sy / 2), 27.5, origin=(x, y)))
+    for r in houses:
+        solid(r)
+    for g in W['solids']:
+        solid(g)
+    for c in cars:
+        x, y, _, rot, _ = c
+        solid(affinity.rotate(box(x - 2.35, y - 0.98, x + 2.35, y + 0.98), rot, origin=(x, y), use_radians=True))
+    posts = [[R1(x), R1(y), R1(r)] for x, y, r in W['posts']]
+    for t in trees:
+        x, y, z, h, rr, kind = t
+        if z > 1.0:
+            continue   # on a podium deck
+        r = max(0.3, min(0.8, rr * 0.55)) if kind == 'shrub' else 0.28 if kind in ('broad', 'full', 'small') else 0.35
+        posts.append([R1(x), R1(y), R1(r)])
+    for p in planted:
+        posts.append([R1(p.x), R1(p.y), 0.45])
+    for pe in people:
+        if pe[2] < 1.0:
+            posts.append([R1(pe[0]), R1(pe[1]), 0.28])
+    lines = [[R1(w), [[R1(x), R1(y)] for x, y in c]] for w, c in W['lines']]
+    # what is underfoot, 1 m grid over the walkable area
+    area = unary_union([REGION, school_ground]).buffer(0)
+    x0, y0, x1, y1 = [math.floor(v) for v in area.bounds[:2]] + [math.ceil(v) for v in area.bounds[2:]]
+    nx, ny = x1 - x0, y1 - y0
+    X, Y = np.meshgrid(np.arange(nx) + x0 + 0.5, np.arange(ny) + y0 + 0.5)
+    grid = np.zeros((ny, nx), np.uint8)
+    def paint(kind, g):
+        if g is None or g.is_empty:
+            return
+        shapely.prepare(g)
+        m = shapely.contains_xy(g, X, Y)
+        grid[m] = kind
+    paint(9, area)
+    paint(1, asphalt)
+    paint(2, paving)
+    paint(3, lawn)
+    paint(4, play)
+    surf = {'school_lawn': 6, 'school_paving': 7, 'track': 8, 'pitch': 5}
+    for name in ('school_lawn', 'school_paving', 'track', 'pitch'):
+        for k, g in W['surf']:
+            if k == name:
+                paint(surf[k], g)
+    # where the walker can get to: a 0.4 m grid of the points a shoulder clear of everything (as
+    # src/sitewalk.js tests a point), only the part joined to the courtyard, no pockets between a
+    # trunk and a fence; for the search of the way to a clicked point and the ring under the pointer
+    G, RW = 0.4, 0.3
+    gx, gy = math.ceil(round(nx / G, 6)), math.ceil(round(ny / G, 6))
+    CX, CY = np.meshgrid(x0 + (np.arange(gx) + 0.5) * G, y0 + (np.arange(gy) + 0.5) * G)
+    ci, cj = np.floor(CX - x0).astype(int), np.floor(CY - y0).astype(int)
+    on = (ci < nx) & (cj < ny)
+    on[on] = grid[cj[on], ci[on]] != 0
+    block = unary_union([Polygon(sr).buffer(RW - 0.02) for sr in solids]
+                        + [LineString(c).buffer(RW + w / 2 - 0.02) for w, c in lines if len(c) > 1]
+                        + [Point(x, y).buffer(RW + r - 0.02, quad_segs=16) for x, y, r in posts])
+    shapely.prepare(block)
+    roomy = on & ~shapely.contains_xy(block, CX, CY)
+    # the parts joined side to side: runs along each row, joined where they overlap the row below
+    rows = []
+    for j in range(gy):
+        d = np.diff(np.concatenate([[0], roomy[j].astype(np.int8), [0]]))
+        rows.append(list(zip(np.flatnonzero(d == 1).tolist(), np.flatnonzero(d == -1).tolist())))
+    up = {}
+    def find(a):
+        while up.get(a, a) != a:
+            up[a] = up.get(up[a], up[a])
+            a = up[a]
+        return a
+    for j in range(1, gy):
+        lo, hi, m = rows[j - 1], rows[j], 0
+        for n, (s0, e0) in enumerate(hi):
+            while m < len(lo) and lo[m][1] <= s0:
+                m += 1
+            k = m
+            while k < len(lo) and lo[k][0] < e0:
+                ra, rb = find((j, n)), find((j - 1, k))
+                if ra != rb:
+                    up[ra] = rb
+                k += 1
+    size = {}
+    for j, rr in enumerate(rows):
+        for n, (s0, e0) in enumerate(rr):
+            r = find((j, n))
+            size[r] = size.get(r, 0) + e0 - s0
+    main = max(size, key=size.get)
+    reach = np.zeros_like(roomy)
+    for j, rr in enumerate(rows):
+        for n, (s0, e0) in enumerate(rr):
+            if find((j, n)) == main:
+                reach[j, s0:e0] = True
+    ri, rj = np.nonzero(reach.T)
+    def snap(q):
+        # a start point inside the reachable part (the nearest such cell if it fell in a pocket)
+        i, j = int((q.x - x0) / G), int((q.y - y0) / G)
+        if reach[j, i]:
+            return q
+        k = np.argmin((ri - i) ** 2 + (rj - j) ** 2)
+        return Point(x0 + (ri[k] + 0.5) * G, y0 + (rj[k] + 0.5) * G)
+    # run lengths along the rows, alternately out of reach and in it, as LEB128 bytes
+    flat = reach.ravel()
+    cuts = np.concatenate([[0], np.flatnonzero(np.diff(flat.astype(np.int8))) + 1, [flat.size]])
+    runs = ([0] if flat[0] else []) + np.diff(cuts).tolist()
+    leb = bytearray()
+    for v in runs:
+        while True:
+            b, v = v & 0x7F, v >> 7
+            leb.append(b | (0x80 if v else 0))
+            if not v:
+                break
+    # where the walk begins: a spot on the paving with a clear view (no trunk, lamp or bench just
+    # before the eye, no other building in the way): the gap between blocks Б and В off the avenue,
+    # looking into the courtyard; and 28-45 m off each block on its courtyard side, looking up at it
+    from .config import BLOCKS
+    P = np.array([[x, y] for x, y, _ in posts])
+    kind_at = lambda x, y: grid[int(y - y0), int(x - x0)] if 0 <= x - x0 < nx and 0 <= y - y0 < ny else 0
+    cand = [(x0 + (i + 0.5) * G, y0 + (j + 0.5) * G) for i, j in zip(ri[::7], rj[::7])
+            if kind_at(x0 + (i + 0.5) * G, y0 + (j + 0.5) * G) in (2, 7)]
+    parts_all = [Polygon(sr) for sr in solids]
+    tree = shapely.STRtree(parts_all)
+    def clutter(q, d, length, width=2.0):
+        # trunks, lamps and people within a few metres of the line of sight, the nearer the worse
+        v = P - q
+        t = np.clip(v @ d, 0, length)
+        off = np.hypot(*(v - t[:, None] * d).T)
+        m = (off < width) & (v @ d > 0) & (np.hypot(*v.T) < length)
+        return float(np.sum(1.0 / np.maximum(1.0, t[m])))
+    def blocked(q, e, skip=None):
+        seg = LineString([q, e])
+        return any(skip is None or not parts_all[k].intersects(skip) for k in tree.query(seg, predicate='intersects'))
+    bb, bv = BLOCKS['B']['centre'], BLOCKS['V']['centre']
+    p0 = np.array([(bb[0] + bv[0]) / 2, (bb[1] + bv[1]) / 2 - 8.0])
+    best = None
+    for q in cand:
+        q = np.array(q)
+        dd = np.hypot(*(q - p0))
+        if dd > 14 or kind_at(*q) != 2 or blocked(q, q + [0, 30.0]):
+            continue
+        wall = min(parts_all[k].distance(Point(q)) for k in tree.query(Point(q).buffer(8.0)) ) if len(tree.query(Point(q).buffer(8.0))) else 8.0
+        sc = clutter(q, np.array([0.0, 1.0]), 30.0, 4.0) * 4 + dd * 0.05 + max(0.0, 6.0 - wall)
+        if best is None or sc < best[0]:
+            best = (sc, q)
+    q = best[1] if best else np.array(snap(Point(*p0)).coords[0])
+    spawn = dict(x=R1(q[0]), y=R1(q[1]), look=[0.0, 1.0], pitch=0.02)
+    blocks = {}
+    for t in towers:
+        out = Polygon(t['outline'])
+        c = np.array(out.centroid.coords[0])
+        a = math.radians(BLOCKS[t['key']]['rot'])
+        # the courtyard side of a slab block is its plan -y; tower A: towards the courtyard (east)
+        side = np.array((math.sin(a), -math.cos(a)) if t['key'] != 'A' else (1.0, 0.0))
+        best = None
+        for q in cand:
+            q = np.array(q)
+            D = out.exterior.distance(Point(q))
+            if not 28.0 <= D <= 45.0 or (q - c) @ side < 0.6 * np.hypot(*(q - c)):
+                continue
+            d = (c - q) / np.hypot(*(c - q))
+            e = np.array(out.exterior.interpolate(out.exterior.project(Point(q))).coords[0])
+            if blocked(q, q + d * (D - 2.0), skip=out) or blocked(q, e + (q - e) * 0.05, skip=out):
+                continue
+            sc = clutter(q, d, D) * 4 + abs(D - 34.0) * 0.08 + (1.0 - (q - c) @ side / np.hypot(*(q - c))) * 3
+            if best is None or sc < best[0]:
+                best = (sc, q, D)
+        if best is None:
+            q, D = np.array(snap(Point(*(c + side * 30))).coords[0]), 30.0
+        else:
+            _, q, D = best
+        pitch = min(0.3, max(0.05, math.atan((t['top'] - 1.6) / D) - 0.62))
+        blocks[t['key']] = dict(x=R1(q[0]), y=R1(q[1]), look=[R1(c[0] - q[0]), R1(c[1] - q[1])], pitch=R1(pitch))
+    return dict(x0=x0, y0=y0, nx=nx, ny=ny, step=1.0, ground=base64.b64encode(grid.tobytes()).decode(),
+                solids=solids, lines=lines, posts=posts, spawn=spawn, blocks=blocks,
+                reach=dict(step=G, gx=gx, gy=gy, runs=base64.b64encode(bytes(leb)).decode()))
