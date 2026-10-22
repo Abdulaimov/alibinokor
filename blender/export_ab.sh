@@ -20,3 +20,6 @@ cp "$OUT.json" src/model/complex.json
 cp "$OUT.plans.json" src/model/plans.json
 cp "$OUT.walk.json" public/models/site_walk.json   # the ground for the walk on the site (src/sitewalk.js)
 ls -la public/models/ali_binokor.glb public/models/site_walk.json src/model/complex.json src/model/plans.json
+# the ground's sky occlusion (the viewer's high quality: src/materials.js GROUND_AO), baked with Cycles
+"$BLENDER" -b "$OUT.blend" -P blender/bake_ground_ao.py -- --ppm 10 --samples 128 --dist 14
+tools/ab/py tools/ab/ground_ao.py

@@ -395,3 +395,67 @@ export function addPeople(scene, list, toScene) {
     }
   });
 }
+
+// ---------- realistic people (high quality) ----------
+// Ten people modelled with MakeHuman (MPFB 2, CC0 assets: bodies, skins, clothes, hair), posed walking,
+// standing, talking, looking at a phone (blender/people/build_people.py -> public/models/people.glb).
+// Each of them drawn as instances at the plan's places, turned at random, the clothes tinted a little
+// differently from person to person (white shirts, light blues, beige, greys) so no two look the same.
+const PEOPLE_URL = `${import.meta.env.BASE_URL}models/people.glb`;
+const CLOTH_TINTS = [0xffffff, 0xffffff, 0xf2ece4, 0xdde6f2, 0xe8e0d6, 0xd4d4d4, 0xf6e6dc, 0xcfdccf, 0xb8bcc4, 0xe6dfef];
+export function addRealPeople(scene, list, toScene) {
+  const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+  return loader.loadAsync(PEOPLE_URL).then((gltf) => {
+    const rnd = rng(9);
+    gltf.scene.updateMatrixWorld(true);
+    const variants = gltf.scene.children.filter((o) => o.children.length).map((root) => {
+      const parts = [];
+      root.traverse((o) => {
+        if (!o.isMesh) return;
+        // (dequantized first: the quantized positions cannot hold the node transform put into them)
+        const g = dequantize(o.geometry).applyMatrix4(new THREE.Matrix4().multiplyMatrices(new THREE.Matrix4().copy(root.matrixWorld).invert(), o.matrixWorld));
+        const m = o.material;
+        if (m.transparent || m.alphaMap || m.map?.format === THREE.RGBAFormat) {
+          // the hair's strands, the lashes: cut out, not sorted (instances cannot be)
+          m.transparent = false;
+          m.alphaTest = 0.45;
+          m.alphaToCoverage = true;
+          m.side = THREE.DoubleSide;
+          m.depthWrite = true;
+        }
+        m.roughness = Math.max(m.roughness ?? 0.8, 0.55);
+        const cloth = /suit|shirt|cloth/i.test(o.name) || /suit/i.test(m.name);
+        parts.push({ g, m, cloth });
+      });
+      return { name: root.name, walking: /walk/.test(root.name), female: /^f_/.test(root.name), parts };
+    });
+    if (!variants.length) throw new Error('no people in the model');
+    // who stands where: walkers on the paths, standing people in the shops and by the benches
+    const byVariant = variants.map(() => []);
+    list.forEach(([x, y, z], i) => {
+      const walking = z < 1.0 ? rnd() < 0.55 : rnd() < 0.2;   // (z over a metre: inside the shops)
+      const pool = variants.map((v, k) => k).filter((k) => variants[k].walking === walking);
+      const k = pool[Math.floor(rnd() * pool.length)];
+      byVariant[k].push({ x, y, z, rot: rnd() * Math.PI * 2, s: 0.96 + rnd() * 0.08, tint: CLOTH_TINTS[Math.floor(rnd() * CLOTH_TINTS.length)] });
+    });
+    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), sc = new THREE.Vector3(), up = new THREE.Vector3(0, 1, 0), c = new THREE.Color();
+    variants.forEach((v, k) => {
+      const people = byVariant[k];
+      if (!people.length) return;
+      for (const part of v.parts) {
+        const im = new THREE.InstancedMesh(part.g, part.m, people.length);
+        people.forEach((pe, i) => {
+          const w = toScene(pe.x, pe.y);
+          im.setMatrixAt(i, m4.compose(p.set(w.x, pe.z, w.z), q.setFromAxisAngle(up, pe.rot), sc.set(pe.s, pe.s, pe.s)));
+          if (part.cloth) im.setColorAt(i, c.setHex(pe.tint));
+        });
+        im.castShadow = true;
+        im.receiveShadow = true;
+        im.frustumCulled = false;
+        im.name = `people ${v.name}`;
+        scene.add(im);
+      }
+    });
+    return variants.length;
+  });
+}

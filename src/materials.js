@@ -22,11 +22,23 @@ export const LAMP = {
   k: { value: 0 },
 };
 LAMP.map.value.needsUpdate = true;
+// The ground's sky occlusion, baked in Blender with Cycles (blender/bake_ground_ao.py): how much sky
+// each point of the ground sees with the buildings, trees, hedges and cars round it. The sky's light on
+// the ground (paths, lawns, the road) is darkened by it: the soft contact shade at the foot of the
+// walls, under the trees and the cars, in the passages. High quality only (k = 0 until it is loaded).
+export const GROUND_AO = {
+  map: { value: LAMP.map.value },
+  box: { value: new THREE.Vector4(0, 0, 1, 1) }, // scene x0, z0, 1 / width, 1 / depth (m)
+  k: { value: 0 },
+};
 export function lampChunk(sh) {
   if (sh.vertexShader.includes('vLampW')) return;
   sh.uniforms.uLampMap = LAMP.map;
   sh.uniforms.uLampBox = LAMP.box;
   sh.uniforms.uLampK = LAMP.k;
+  sh.uniforms.uGroundAO = GROUND_AO.map;
+  sh.uniforms.uGroundBox = GROUND_AO.box;
+  sh.uniforms.uGroundK = GROUND_AO.k;
   sh.vertexShader = sh.vertexShader
     .replace('#include <common>', '#include <common>\nvarying vec3 vLampW;')
     .replace('#include <project_vertex>', `#include <project_vertex>
@@ -38,7 +50,17 @@ export function lampChunk(sh) {
         vLampW = (modelMatrix * lw).xyz;
       }`);
   sh.fragmentShader = sh.fragmentShader
-    .replace('#include <common>', '#include <common>\nvarying vec3 vLampW;\nuniform sampler2D uLampMap;\nuniform vec4 uLampBox;\nuniform float uLampK;')
+    .replace('#include <common>', '#include <common>\nvarying vec3 vLampW;\nuniform sampler2D uLampMap;\nuniform vec4 uLampBox;\nuniform float uLampK;\nuniform sampler2D uGroundAO;\nuniform vec4 uGroundBox;\nuniform float uGroundK;')
+    .replace('#include <aomap_fragment>', `#include <aomap_fragment>
+      if (uGroundK > 0.0 && vLampW.y < 0.36) {
+        vec2 guv = (vLampW.xz - uGroundBox.xy) * uGroundBox.zw;
+        vec3 gn = inverseTransformDirection(normal, viewMatrix);
+        if (gn.y > 0.5 && guv.x > 0.0 && guv.y > 0.0 && guv.x < 1.0 && guv.y < 1.0) {
+          float g = mix(1.0, pow(texture2D(uGroundAO, guv).r, 0.75), uGroundK);
+          reflectedLight.indirectDiffuse *= g;
+          reflectedLight.indirectSpecular *= mix(1.0, g, 0.7);
+        }
+      }`)
     .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
       if (uLampK > 0.0) {
         vec2 luv = (vLampW.xz - uLampBox.xy) * uLampBox.zw;

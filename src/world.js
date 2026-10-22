@@ -8,7 +8,7 @@
 import * as THREE from 'three';
 import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
 import { CARS, PEOPLE, TREES, toScene } from './config.js';
-import { addCars, addPeople, addTrees } from './props.js';
+import { addCars, addPeople, addRealPeople, addTrees } from './props.js';
 import { Q } from './quality.js';
 import skyInfo from '../public/env/sky.json';
 
@@ -234,7 +234,13 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
     })
     .catch((e) => console.warn('sky', e));
 
-  addPeople(scene, PEOPLE, toScene);
+  // people: modelled ones on computers (a 1.7 MB model), the light figures on phones and as a fallback
+  if (Q.level === 'high') {
+    after.then(() => addRealPeople(scene, PEOPLE, toScene)).catch((e) => {
+      console.warn('people', e);
+      addPeople(scene, PEOPLE, toScene);
+    });
+  } else addPeople(scene, PEOPLE, toScene);
   const props = after.then(() => {
     // the complex's trees, then the city's (site metres for both: scene z = -north)
     const around = cityTrees.map((t, i) => [t.x, -t.z, 0, t.h, t.h * 0.38, i % 7 === 0 ? 'conifer' : i % 5 === 0 ? 'poplar' : 'broad']);

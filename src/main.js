@@ -11,6 +11,9 @@ import { buildFloor } from './floor.js';
 import { KINDS, loadSiteMap, siteWalk } from './sitewalk.js';
 import { DAY, FIRST, LAST, clock as hhmm, timeOfDay } from './night.js';
 import { ROOM_LIGHT } from './interior/materials.js';
+import { captureReflections } from './reflections.js';
+import { addGrass } from './grass.js';
+import { GROUND_AO } from './materials.js';
 import { WalkControls } from './walk.js';
 import { drawPlan, planTransform } from './plan.js';
 import { Q, setQuality } from './quality.js';
@@ -173,9 +176,46 @@ Promise.all([modelLoad, world.ready])
     });
     daytime.indoors(!!outdoor);
     $('#daytime').hidden = false;
+    if (Q.level === 'high') highQuality();
   })
   .catch((e) => console.warn('time of day', e));
 dtRange.addEventListener('input', () => setHours(+dtRange.value));
+
+let grass = null;
+// High quality (computers): the ground's baked sky occlusion and glass that reflects its surroundings
+// (taken once, in daylight, when everything is in; the floor or flat open meanwhile is put back)
+async function highQuality() {
+  try {
+    const base = `${import.meta.env.BASE_URL}models/`;
+    const [box, tex] = await Promise.all([
+      fetch(`${base}ground_ao.json`).then((r) => r.json()),
+      new THREE.TextureLoader().loadAsync(`${base}ground_ao.webp`),
+    ]);
+    tex.colorSpace = THREE.NoColorSpace;
+    tex.wrapS = tex.wrapT = THREE.ClampToEdgeWrapping;
+    tex.anisotropy = 4;
+    GROUND_AO.map.value = tex;
+    GROUND_AO.box.value.set(box.x0, box.z0, 1 / box.w, 1 / box.d);
+    GROUND_AO.k.value = 0.7;
+  } catch (e) {
+    console.warn('ground occlusion', e);
+  }
+  // grass with blades on the lawns round the camera, the trees and the grass in a light breeze
+  try {
+    grass = addGrass(scene, await loadSiteMap(), WIND);
+    WIND.amp.value = 0.07;
+  } catch (e) {
+    console.warn('grass', e);
+  }
+  await new Promise((r) => setTimeout(r, 300));
+  const hours = daytime.hours;
+  if (hours !== DAY) daytime.set(DAY);
+  captureReflections({ renderer, scene, building, towers: TOWERS, toScene });
+  if (hours !== DAY) daytime.set(hours);
+  if (state.mode === 'floor' && state.tower) building.showUpTo(state.tower, state.floor);
+  else if (state.mode === 'walk' && walkInterior && !walkInterior.outdoor) building.showAll(state.tower, state.floor);
+  shadowsDirty();
+}
 // let go of the slider: the arrow keys walk again (a focused slider would take them)
 dtRange.addEventListener('pointerup', () => dtRange.blur());
 
@@ -1230,6 +1270,10 @@ renderer.setAnimationLoop(() => {
     updatePlaces();
   }
   for (const n of water) n.offset.x += dt * 0.006, n.offset.y += dt * 0.004;
+  if (grass) {
+    WIND.t.value += dt;
+    grass.update(camera);
+  }
   ROOM_LIGHT.value = !daytime ? 0 : state.mode !== 'walk' ? daytime.state.lights * 0.55 : walkInterior?.outdoor ? 0 : daytime.state.lights * 0.38;
   updateCars(camera);
   if (shadowFrames > 0) {

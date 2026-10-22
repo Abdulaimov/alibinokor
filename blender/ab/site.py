@@ -616,14 +616,17 @@ def build_site(mats, col, towers, pods):
                 continue
             zg = Z['lawn'] if lawn.contains(p) else Z['paving']
             if i % 2 == 0:
-                cypress(mb, sx, sy, zg, rnd.uniform(5.5, 7.0), rnd)
+                # (22.10.2026) a photographed columnar conifer (the viewer's tree atlases) instead of
+                # the smooth modelled column, which read as plastic close up
+                trees.append([round(sx, 2), round(sy, 2), zg, round(rnd.uniform(5.5, 7.0), 2), 0.95, 'poplar'])
             else:
                 topiary(mb, sx, sy, zg, rnd)
+                # (the conifers get their bed with the other trees' below)
+                if zg == Z['lawn']:
+                    mulch(mb, sx, sy, zg, 1.0)
+                else:
+                    grate(mb, sx, sy, zg, ang)
             planted.append(p)
-            if zg == Z['lawn']:
-                mulch(mb, sx, sy, zg, 1.0)
-            else:
-                grate(mb, sx, sy, zg, ang)
     # beds under the trees: mulch on the lawns, grates in the paving (inside the plot)
     for t in trees:
         p = Point(t[0], t[1])
@@ -673,6 +676,29 @@ def build_site(mats, col, towers, pods):
     walk = walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hosp, raw, houses, trees, planted, cars, people, school_fp)
     return dict(trees=trees, cars=cars, people=people, labels=labels, walk=walk, lamps=[list(l) for l in LS.LIGHTS],
                 benches=[[round(c[0], 2), round(c[1], 2), round(r, 3)] for c, r, _ in seats])
+
+
+def lawn_mask(lawn, W, x0, y0, nx, ny, step=0.25):
+    """where the lawns are, finer than the ground grid (the viewer's grass grows only there, never on a
+    kerb or the paving): a step x step m grid, run lengths along the rows (out, in, out...) as LEB128"""
+    import base64
+    import numpy as np
+    import shapely
+    g = unary_union([lawn] + [geom for k, geom in W['surf'] if k == 'school_lawn']).buffer(-0.12)
+    shapely.prepare(g)
+    gx, gy = int(round(nx / step)), int(round(ny / step))
+    X, Y = np.meshgrid(x0 + (np.arange(gx) + 0.5) * step, y0 + (np.arange(gy) + 0.5) * step)
+    flat = shapely.contains_xy(g, X, Y).ravel()
+    cuts = np.concatenate([[0], np.flatnonzero(np.diff(flat.astype(np.int8))) + 1, [flat.size]])
+    runs = ([0] if flat[0] else []) + np.diff(cuts).tolist()
+    leb = bytearray()
+    for v in runs:
+        while True:
+            b, v = v & 0x7F, v >> 7
+            leb.append(b | (0x80 if v else 0))
+            if not v:
+                break
+    return dict(step=step, gx=gx, gy=gy, runs=base64.b64encode(bytes(leb)).decode())
 
 
 def walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hosp, raw, houses, trees, planted, cars, people, school_ground):
@@ -876,4 +902,5 @@ def walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hos
         blocks[t['key']] = dict(x=R1(q[0]), y=R1(q[1]), look=[R1(c[0] - q[0]), R1(c[1] - q[1])], pitch=R1(pitch))
     return dict(x0=x0, y0=y0, nx=nx, ny=ny, step=1.0, ground=base64.b64encode(grid.tobytes()).decode(),
                 solids=solids, lines=lines, posts=posts, spawn=spawn, blocks=blocks,
-                reach=dict(step=G, gx=gx, gy=gy, runs=base64.b64encode(bytes(leb)).decode()))
+                reach=dict(step=G, gx=gx, gy=gy, runs=base64.b64encode(bytes(leb)).decode()),
+                lawn=lawn_mask(lawn, W, x0, y0, nx, ny))

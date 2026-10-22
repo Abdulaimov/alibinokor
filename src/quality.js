@@ -1,6 +1,7 @@
 // Graphics level: 'high' on computers, 'low' on phones and small tablets (or ?quality=low|high,
 // or the switch in the corner, remembered per browser).
-//   high  1k textures, 4096 shadow map, ambient occlusion pass, pixel ratio up to 2
+//   high  1k textures, 8192 shadow map, ambient occlusion pass (full resolution), the ground's baked
+//         occlusion, glass reflecting its surroundings, bloom and a grade, pixel ratio up to 2
 //   low   512 px textures, 2048 shadow map, no post-processing, pixel ratio up to 1.5
 const KEY = 'alibinokor.quality';
 
@@ -26,7 +27,7 @@ export const Q = {
   level: QUALITY,
   textureSize: high ? '1k' : '512',
   pixelRatio: Math.min(devicePixelRatio || 1, high ? 2 : 1.5),
-  shadowMap: high ? 4096 : 2048,
+  shadowMap: high ? 8192 : 2048,
   ao: high,
   skyRes: high ? '2k' : '1k',
   antialias: true,
