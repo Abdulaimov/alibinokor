@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
-import { LAMPS, LETTER, PLACES, RESIDENTIAL, TOWERS, planFrame, toScene, towerByKey } from './config.js';
+import { LAMPS, LETTER, PLACES, RESIDENTIAL, SHOPS, TOWERS, planFrame, toScene, towerByKey } from './config.js';
+import { addSigns } from './signs.js';
 import { bounds, interiorPoint } from './geometry.js';
 import { apartments, aptsOnFloor, summaryOf } from './data.js';
 import { buildWorld } from './world.js';
@@ -15,7 +16,7 @@ import { drawPlan, planTransform } from './plan.js';
 import { Q, setQuality } from './quality.js';
 import { createRenderer, createPipeline } from './render.js';
 import { setupMaterial, water } from './materials.js';
-import { updateCars } from './props.js';
+import { WIND, driveCars, setDrivers, updateCars } from './props.js';
 import { L, getLang, num, setLang } from './i18n.js';
 
 const $ = (s) => document.querySelector(s);
@@ -125,6 +126,9 @@ modelLoad
     building = b;
     scene.add(b.group);
     setupMaterial(world.cityMat, renderer);
+    addSigns(scene, SHOPS, toScene, new URLSearchParams(location.search).get('signs'))
+      .then(() => (daytime?.refresh(), shadowsDirty()))
+      .catch((e) => console.warn('signs', e));
     shadowsDirty();
     loadingEl.hidden = true;
     refresh();
@@ -160,9 +164,10 @@ showHours(DAY);
 Promise.all([modelLoad, world.ready])
   .then(() => {
     daytime = timeOfDay({
-      scene, camera, renderer, world, lamps: LAMPS, toScene, cityLights: world.cityLights,
-      changed: () => {
+      scene, camera, renderer, world, lamps: LAMPS, shops: SHOPS, toScene, cityLights: world.cityLights,
+      changed: (s) => {
         lightIndoors();
+        pipeline.bloom(s.lights * 1.15);
         shadowsDirty();
       },
     });
@@ -1248,6 +1253,7 @@ window.__app = {
   get interior() { return walkInterior; },
   selectBlock, selectFloor, selectApt, enterWalk, exitWalk, goOverview, enterSiteWalk,
   get daytime() { return daytime; },
+  film: { WIND, driveCars, setDrivers, updateCars, shadowsDirty: () => shadowsDirty() },
   setHours: (h) => setHours(h),
   setClean: (on) => setClean(on),
   setView(pos, target) {

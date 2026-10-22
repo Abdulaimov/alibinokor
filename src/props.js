@@ -6,6 +6,7 @@ import { mergeGeometries } from 'three/addons/utils/BufferGeometryUtils.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { MeshoptDecoder } from 'three/addons/libs/meshopt_decoder.module.js';
 import { Q } from './quality.js';
+import { lampChunk } from './materials.js';
 import TREES_INFO from '../public/trees/trees.json';
 
 // deterministic noise so every visit looks the same
@@ -60,6 +61,9 @@ function impostorGeometry(v) {
 // Foliage cut-outs thin out in the smaller mip levels (averaging leaves with sky lowers alpha below the
 // cut), so distant trees would look bare. Alpha is scaled up with the mip level actually sampled
 // (keeps the crown's coverage), then three.js sharpens it for alpha-to-coverage.
+// a breeze in the trees (the TV film sets it; the site keeps them still): amplitude and time
+export const WIND = { amp: { value: 0 }, t: { value: 0 } };
+
 function treeMaterial(atlas, size) {
   const loader = new THREE.TextureLoader();
   const color = loader.load(`${TREE_URL}${atlas}color_${size}.webp`);
@@ -76,6 +80,23 @@ function treeMaterial(atlas, size) {
   });
   const px = size === '2k' ? 2048 : 1024;
   mat.onBeforeCompile = (sh) => {
+    lampChunk(sh); // lit by the street lamps at night
+    sh.uniforms.uWindAmp = WIND.amp;
+    sh.uniforms.uWindT = WIND.t;
+    // the crown sways a few centimetres, more towards the top, each tree in its own phase (the
+    // periods divide 70 s: the film loops without a jump)
+    sh.vertexShader = sh.vertexShader
+      .replace('#include <common>', '#include <common>\nuniform float uWindAmp;\nuniform float uWindT;')
+      .replace('#include <begin_vertex>', `#include <begin_vertex>
+        if (uWindAmp > 0.0) {
+          float ph = 0.0;
+          #ifdef USE_INSTANCING
+            ph = instanceMatrix[3].x * 0.37 + instanceMatrix[3].z * 0.23;
+          #endif
+          float sw = uWindAmp * position.y * position.y * 0.004;
+          transformed.x += sw * sin(uWindT * 1.0771 + ph);
+          transformed.z += sw * 0.6 * sin(uWindT * 0.8976 + ph * 1.7);
+        }`);
     sh.fragmentShader = sh.fragmentShader.replace('#include <alphatest_fragment>', `
       {
         vec2 t = vMapUv * ${px.toFixed(1)};
@@ -178,9 +199,23 @@ function dequantize(geo) {
 }
 
 let carUpdate = null;
+// cars driving (the TV film): [{ type, color, at(t) -> { x, y, r } site metres }], placed by driveCars(t)
+const movers = [];
+let moversDirty = false;
 /** Sort the cars into near / far bodies for this camera; true when anything changed. */
 export function updateCars(camera) {
   return carUpdate?.(camera) ?? false;
+}
+
+/** Cars on the move (the TV film): set once with their routes, then placed for each frame. */
+export function setDrivers(list) {
+  movers.length = 0;
+  movers.push(...list);
+  moversDirty = true;
+}
+export function driveCars(t) {
+  for (const m of movers) m.t = t;
+  moversDirty = true;
 }
 
 export function addCars(scene, list, toScene) {
@@ -191,13 +226,15 @@ export function addCars(scene, list, toScene) {
     // body type -> { near: [InstancedMesh], far: [InstancedMesh] }
     const byType = {};
     const cars = list.map(([x, y, z, r, k], i) => ({ type: CAR_TYPES[(k + i) % CAR_TYPES.length], x, y, z, r, color: CAR_PAINT[(k * 3 + i) % CAR_PAINT.length] }));
+    const SPARE = 3; // room in each body type for a few cars on the move
     gltf.scene.updateMatrixWorld(true);
     gltf.scene.traverse((o) => {
       if (!o.isMesh) return;
       const node = o.parent?.isMesh || o.parent === gltf.scene ? o : o.parent;
       const [type, far] = (node.name || o.name).split('_');
-      const n = cars.filter((c) => c.type === type).length;
-      if (!n) return;
+      const parked = cars.filter((c) => c.type === type).length;
+      if (!parked) return;
+      const n = parked + SPARE;
       const slot = (byType[type] ??= { near: [], far: [] })[far ? 'far' : 'near'];
       const g = dequantize(o.geometry).applyMatrix4(o.matrixWorld);
       const im = new THREE.InstancedMesh(g, mat(o.material.name), n);
@@ -218,11 +255,17 @@ export function addCars(scene, list, toScene) {
     }
     const last = new THREE.Vector3(1e9, 0, 0);
     carUpdate = (camera) => {
-      if (camera.position.distanceToSquared(last) < 4) return false; // re-sort only when the camera moved
+      if (camera.position.distanceToSquared(last) < 4 && !moversDirty) return false; // re-sort only when the camera or a car moved
       last.copy(camera.position);
+      moversDirty = false;
+      const driving = movers.filter((m) => byType[m.type]).map((m) => {
+        const s = m.at(m.t ?? 0), w = toScene(s.x, s.y);
+        const pos = new THREE.Vector3(w.x, 0.0, w.z);
+        return { type: m.type, color: m.color, pos, matrix: m4.compose(pos, q.setFromAxisAngle(up, s.r), one).clone() };
+      });
       for (const [type, slots] of Object.entries(byType)) {
         let nn = 0, nf = 0;
-        for (const car of cars) {
+        for (const car of [...cars, ...driving.filter((d) => d.type === type).slice(0, SPARE)]) {
           if (car.type !== type) continue;
           const near = car.pos.distanceTo(camera.position) < CAR_NEAR;
           const set = near ? slots.near : slots.far;

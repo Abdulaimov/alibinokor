@@ -8,6 +8,7 @@ Levels: roads at 0, paving +0.12, lawns +0.15 behind a kerb, play surfaces +0.13
 import math
 import random
 
+import shapely
 from shapely import affinity
 from shapely.geometry import LineString, MultiPolygon, Point, Polygon, box
 from shapely.ops import unary_union
@@ -439,8 +440,9 @@ def build_site(mats, col, towers, pods):
         if r.area > 2500 or r.intersects(asphalt.buffer(2)):
             continue
         houses.append(r)
-    for r in houses:
-        mb.prism(r, 0.0, 15.0, 'Neighbour solid', 'Roof')
+    paints = ['Neighbour cream', 'Neighbour peach', 'Neighbour blue', 'Neighbour solid', 'Neighbour mint', 'Neighbour rose']
+    for i, r in enumerate(houses):
+        mb.prism(r, 0.0, 15.0, paints[i % len(paints)], 'Roof')
 
     # lamps along the paths and the roads, benches by the lawns (kept apart: one lamp per 15 m,
     # one bench per 9 m, whatever the outlines of the paved areas)
@@ -458,20 +460,44 @@ def build_site(mats, col, towers, pods):
             if built.buffer(2.5).contains(Point(p)) or not spaced(lamps, p, 15.0):
                 continue
             lamp(mb, p[0], p[1], Z['paving'], 4.2)
+    # A bench stands on the paving at a lawn's edge, its back to the lawn and the seat facing the
+    # path (whichever way the lawn's outline runs: 22.10.2026 some faced the lawn, half on the kerb),
+    # wholly on the paving with 1.5 m clear in front of it (no bench where the path is too narrow
+    # for it and people to pass), off the lamps; the trees, plantings and people come after it and
+    # keep clear of it (BENCH_ZONES)
+    seats, seat_zones = [], []
+    # what stands already: play equipment, verandas, the school and the pitch, their fences, posts and trees
+    standing = unary_union([g.buffer(0.3) for g in LS.WALK['solids']]
+                           + [LineString(cc).buffer(wd / 2 + 0.3) for wd, cc in LS.WALK['lines'] if len(cc) > 1]
+                           + [Point(x, y).buffer(r + 0.4) for x, y, r in LS.WALK['posts']]
+                           + [Point(t[0], t[1]).buffer(1.2) for t in school_trees + pitch_trees])
     for q in parts(lawn.intersection(inside)):
         if q.area < 40:
             continue
         ring = ring_coords(q)
         for i, p in enumerate(resample(ring, 23.0)):
             pp = Point(p)
-            if paving.distance(pp) > 0.6 or built.buffer(4).contains(pp) or not spaced(benches, p, 9.0):
+            if paving.distance(pp) > 0.6 or built.buffer(4).contains(pp) or any(math.dist(p, b) < 9.0 for b in benches):
                 continue
-            # face away from the lawn
-            near = q.exterior.interpolate(q.exterior.project(pp))
-            d = q.exterior.interpolate(q.exterior.project(pp) + 0.5)
-            rot = math.atan2(d.y - near.y, d.x - near.x)
-            ox, oy = math.sin(rot) * 0.8, -math.cos(rot) * 0.8
-            bench(mb, p[0] + ox, p[1] + oy, Z['paving'], rot)
+            s = q.exterior.project(pp)
+            a, b = q.exterior.interpolate(s - 0.6), q.exterior.interpolate(s + 0.6)
+            rot = math.atan2(b.y - a.y, b.x - a.x)
+            n = (math.sin(rot), -math.cos(rot))  # the way the sitter faces (bench(): back on the other side)
+            if not paving.contains(Point(p[0] + n[0] * 1.5, p[1] + n[1] * 1.5)):
+                rot += math.pi
+                n = (-n[0], -n[1])
+            c = (p[0] + n[0] * 0.65, p[1] + n[1] * 0.65)
+            seat = affinity.rotate(box(c[0] - 0.95, c[1] - 0.3, c[0] + 0.95, c[1] + 0.3), rot, origin=c, use_radians=True)
+            front = affinity.rotate(box(c[0] - 0.95, c[1] - 1.8, c[0] + 0.95, c[1] - 0.3), rot, origin=c, use_radians=True)
+            if (not paving.buffer(-0.05).contains(seat) or not paving.buffer(-0.05).contains(front)
+                    or any(math.dist(c, l) < 1.6 for l in lamps) or standing.intersects(seat.union(front))):
+                continue
+            benches.append(p)
+            seats.append((c, rot, seat))
+            seat_zones.append((seat, front))
+            bench(mb, c[0], c[1], Z['paving'], rot)
+    BENCH_ZONES = unary_union([g.buffer(1.4) for _, _, g in seats]) if seats else Polygon()
+    print(f'benches by the lawns: {len(seats)}')
     # street lamps: along the road edges outside the plot, every 30 m
     verge = unary_union([lawn, paving])
     for q in parts(asphalt):
@@ -527,11 +553,12 @@ def build_site(mats, col, towers, pods):
     # trees: the school's and the pitch's, the genplan's, then lawns filled in, then street trees
     # along the verges (none on the pitch, the playgrounds or by the kindergarten's walls)
     trees += school_trees + pitch_trees
-    no_trees = unary_union([built.buffer(3.5), school_fp.buffer(2), play.buffer(0.6)]
+    no_trees = unary_union([built.buffer(3.5), school_fp.buffer(2), play.buffer(0.6), BENCH_ZONES.buffer(0.4)]
                            + ([pitch_fit[3].buffer(2.5)] if pitch_fit else []) + ([kinder.buffer(3.0)] if kinder is not None else []))
 
     def free(p, gap):
-        return not no_trees.contains(p) and all(p.distance(Point(t[0], t[1])) >= gap for t in trees)
+        return (not no_trees.contains(p) and all(p.distance(Point(t[0], t[1])) >= gap for t in trees)
+                and all(p.distance(Point(l)) >= 1.8 for l in lamps))
     for x, y in raw['trees']:
         p = Point(x, y)
         if REGION.contains(p) and free(p, 2.5):
@@ -565,7 +592,7 @@ def build_site(mats, col, towers, pods):
     soft_ground = unary_union([lawn, paving]).difference(built.buffer(3.0))
 
     def free_spot(p, gap=3.2):
-        return (soft_ground.contains(p) and all(p.distance(Point(t[0], t[1])) > gap for t in trees)
+        return (soft_ground.contains(p) and not BENCH_ZONES.contains(p) and all(p.distance(Point(t[0], t[1])) > gap for t in trees)
                 and all(p.distance(Point(q)) > 2.0 for q in lamps) and all(p.distance(q) > gap for q in planted))
     for key, side in (('B', 'y'), ('V', 'y'), ('G', 'y'), ('D', 'y'), ('A', '-y'), ('A', '-x')):
         b = BLOCKS[key]
@@ -607,10 +634,16 @@ def build_site(mats, col, towers, pods):
         elif paving.buffer(-0.8).contains(p):
             grate(mb, t[0], t[1], Z['paving'], 0.47)
     # shrub groups and flower beds on the lawns
-    avoid = unary_union([Point(t[0], t[1]).buffer(max(1.2, t[4] * 0.6)) for t in trees] + [play.buffer(1.0), no_trees])
+    avoid = unary_union([Point(t[0], t[1]).buffer(max(1.2, t[4] * 0.6)) for t in trees] + [play.buffer(1.0), no_trees, BENCH_ZONES]
+                        + [Point(l).buffer(1.2) for l in lamps])
     trees += LS.plantings(mb, lawn.intersection(inside), avoid, rnd, Z['lawn'])
-    # people on the paths and plazas
-    walk = paving.intersection(inside).difference(built.buffer(1.0))
+    # people on the paths and plazas: not on a bench's seat or in its way, not in a lamp, a tree's
+    # grate or a planting
+    taken = unary_union([BENCH_ZONES.buffer(-0.6)]
+                        + [Point(l).buffer(0.6) for l in lamps]
+                        + [Point(t[0], t[1]).buffer(1.0) for t in trees if t[2] < 1.0]
+                        + [q.buffer(1.0) for q in planted])
+    walk = paving.intersection(inside).difference(built.buffer(1.0)).difference(taken)
     x0, y0, x1, y1 = walk.bounds
     n = 0
     while n < 140:
@@ -618,6 +651,19 @@ def build_site(mats, col, towers, pods):
         if walk.contains(p):
             people.append([round(p.x, 2), round(p.y, 2), Z['paving'], rnd.randrange(6)])
             n += 1
+    # nobody inside a building, a car, a bench, play equipment or a veranda (the playgrounds', the
+    # pitch's and the school's people were placed before some of these stood)
+    occupied = unary_union([g.buffer(0.35) for g in LS.WALK['solids']]
+                           + [affinity.rotate(box(x - 2.6, y - 1.2, x + 2.6, y + 1.2), r, origin=(x, y), use_radians=True) for x, y, _, r, _ in cars]
+                           + [Point(l).buffer(0.6) for l in lamps]
+                           + [Point(t[0], t[1]).buffer(0.8) for t in trees if t[2] < 1.0]
+                           + ([kinder.buffer(0.4)] if kinder is not None else []) + [g.buffer(0.4) for g in hosp] + [r.buffer(0.4) for r in houses]
+                           + [g.minimum_rotated_rectangle.buffer(0.6) for g in blue if g.area <= 400]
+                           + [seat.union(front).buffer(0.4) for seat, front in seat_zones])
+    shapely.prepare(occupied)
+    before = len(people)
+    people[:] = [p for p in people if p[2] >= 1.0 or not occupied.contains(Point(p[0], p[1]))]
+    print(f'people: {len(people)} ({before - len(people)} taken out of buildings, cars, benches and equipment)')
     for t in towers:
         c = Polygon(t['outline']).centroid
         labels.append(dict(x=round(c.x, 2), y=round(c.y, 2), z=t['top'] + 9, ru=t['label'], tj=t['tj'], kind='block', key=t['key']))
@@ -625,7 +671,8 @@ def build_site(mats, col, towers, pods):
     om = mb.to_mesh('Site props', mats)
     make_object('Site props', om, col)
     walk = walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hosp, raw, houses, trees, planted, cars, people, school_fp)
-    return dict(trees=trees, cars=cars, people=people, labels=labels, walk=walk, lamps=[list(l) for l in LS.LIGHTS])
+    return dict(trees=trees, cars=cars, people=people, labels=labels, walk=walk, lamps=[list(l) for l in LS.LIGHTS],
+                benches=[[round(c[0], 2), round(c[1], 2), round(r, 3)] for c, r, _ in seats])
 
 
 def walk_map(towers, built, kinder, plot, asphalt, paving, lawn, play, blue, hosp, raw, houses, trees, planted, cars, people, school_ground):

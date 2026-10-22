@@ -7,7 +7,7 @@
 //   lamps: the build's lamp heads (model/complex.json lamps: [x, y, z, aim x, aim y, kind], site
 //   metres; kind 0 a path lamp, 1 a street lamp on its arm, 2 a floodlight aimed at the pitch)
 import * as THREE from 'three';
-import { NIGHT } from './materials.js';
+import { LAMP, NIGHT } from './materials.js';
 
 export const DAY = 15; // the hour the scene was lit for: the slider starts here
 export const FIRST = 6, LAST = 23.5; // the slider's hours
@@ -76,7 +76,7 @@ const DOME_FRAG = /* glsl */ `
     #include <colorspace_fragment>
   }`;
 
-export function timeOfDay({ scene, camera, renderer, world, lamps = [], toScene, cityLights = [], changed = () => {} }) {
+export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = [], toScene, cityLights = [], changed = () => {} }) {
   const sun = world.sun;
   const base = {
     dir: sun.position.clone().sub(sun.target.position).normalize(),
@@ -88,6 +88,7 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], toScene,
     fogD: scene.fog.density,
     glass: new Map(), // glass material -> its own reflection strength
     glow: new Map(), // lamp heads' emissive material -> its daytime strength
+    signs: new Map(), // shop signs (src/signs.js) -> [day, night] glow
   };
   const A0 = Math.atan2(base.dir.x, -base.dir.z), el0 = Math.asin(base.dir.y);
   const sinMax = Math.min(1, Math.sin(el0) / Math.sin((Math.PI * (DAY - RISE)) / (SET - RISE)));
@@ -168,41 +169,56 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], toScene,
   moonSky.color.set(0x6074a8);
   moonSky.groundColor.set(0x24262c);
 
-  // ---------- lamps: the glow round each head and the pool of light on the ground under it ----------
+  // ---------- lamps: the light they throw (materials.js LAMP), the glow round each head ----------
   const lampsGroup = new THREE.Group();
   lampsGroup.visible = false;
   scene.add(lampsGroup);
-  const warm = new THREE.Color(0xffcf94), cool = new THREE.Color(0xf4f1ff);
-  const poolMat = new THREE.MeshBasicMaterial({ map: spot(), color: warm, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0, polygonOffset: true, polygonOffsetFactor: -4 });
-  const floodMat = poolMat.clone();
-  floodMat.color = cool.clone();
-  const glowMat = new THREE.PointsMaterial({ map: spot(0.18), color: 0xffe0b0, size: 1.7, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0 });
-  const plane = new THREE.PlaneGeometry(1, 1).rotateX(-Math.PI / 2);
-  const pools = lamps.filter((l) => l[5] !== 2);
-  if (pools.length) {
-    const im = new THREE.InstancedMesh(plane, poolMat, pools.length);
-    const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), s = new THREE.Vector3(), p = new THREE.Vector3();
-    pools.forEach(([x, y, z, , , kind], i) => {
-      const c = toScene(x, y), r = kind === 1 ? 15 : 9;
-      im.setMatrixAt(i, m4.compose(p.set(c.x, 0.17, c.z), q, s.set(r, 1, r)));
-    });
-    im.frustumCulled = false;
-    im.renderOrder = 2;
-    lampsGroup.add(im);
-  }
-  // the pitch under its floodlights: one long pool from the masts' aim, a little wider than it
-  const floods = lamps.filter((l) => l[5] === 2);
-  if (floods.length) {
-    const xs = floods.map((l) => toScene(l[0], l[1])), aim = toScene(floods[0][3], floods[0][4]);
-    const span = Math.max(...xs.map((c) => Math.hypot(c.x - aim.x, c.z - aim.z)));
-    const far = xs.reduce((a, c) => (Math.hypot(c.x - aim.x, c.z - aim.z) > Math.hypot(a.x - aim.x, a.z - aim.z) ? c : a));
-    const ang = Math.atan2(far.z - aim.z, far.x - aim.x);
-    const pool = new THREE.Mesh(plane, floodMat);
-    pool.position.set(aim.x, 0.2, aim.z);
-    pool.scale.set(span * 2.2, 1, span * 2.2);
-    pool.rotation.y = -ang;
-    pool.renderOrder = 2;
-    lampsGroup.add(pool);
+  const glowMat = new THREE.PointsMaterial({ map: spot(0.18), color: 0xffe0b0, size: 1.5, sizeAttenuation: true, transparent: true, depthWrite: false, blending: THREE.AdditiveBlending, fog: false, opacity: 0 });
+  // the map of the light seen from above, 5 px a metre: a warm pool under each path lamp, a wider
+  // one under each street lamp's head, the pitch white under its floodlights, the shop windows'
+  // glow spilling onto the pavement and up the stone round them
+  {
+    const pts = [...lamps.map((l) => toScene(l[0], l[1])), ...shops.map((b) => toScene(b[3], b[4]))];
+    if (pts.length) {
+      const x0 = Math.min(...pts.map((p) => p.x)) - 30, x1 = Math.max(...pts.map((p) => p.x)) + 30;
+      const z0 = Math.min(...pts.map((p) => p.z)) - 30, z1 = Math.max(...pts.map((p) => p.z)) + 30;
+      const W = Math.min(4096, Math.ceil((x1 - x0) * 5)), H = Math.min(4096, Math.ceil((z1 - z0) * 5));
+      const sx = W / (x1 - x0), sz = H / (z1 - z0);
+      const c = document.createElement('canvas');
+      c.width = W;
+      c.height = H;
+      const g = c.getContext('2d');
+      g.fillStyle = '#000';
+      g.fillRect(0, 0, W, H);
+      g.globalCompositeOperation = 'lighter';
+      const pool = (x, z, r, [R, G, B], k) => {
+        const px = (x - x0) * sx, pz = (z - z0) * sz, rr = r * sx;
+        const grd = g.createRadialGradient(px, pz, 0, px, pz, rr);
+        for (const t of [0, 0.1, 0.25, 0.45, 0.7, 0.9, 1]) grd.addColorStop(t, `rgba(${R},${G},${B},${(k * (1 - t * t) ** 2.2).toFixed(3)})`);
+        g.fillStyle = grd;
+        g.fillRect(px - rr, pz - rr, rr * 2, rr * 2);
+      };
+      for (const [x, y, , ax, ay, kind] of lamps) {
+        const p = toScene(x, y);
+        if (kind === 0) pool(p.x, p.z, 9, [255, 186, 112], 0.9);
+        else if (kind === 1) pool(p.x, p.z, 16, [255, 196, 128], 0.85);
+        else {
+          // a floodlight: light thrown a third of the way to the pitch's middle, and the pitch itself
+          const a = toScene(ax, ay);
+          pool(p.x + (a.x - p.x) * 0.35, p.z + (a.z - p.z) * 0.35, 13, [226, 236, 255], 0.55);
+          pool(a.x, a.z, 18, [226, 236, 255], 0.22);
+        }
+      }
+      for (const b of shops) {
+        const m = toScene((b[3] + b[5]) / 2 + b[9] * 1.8, (b[4] + b[6]) / 2 + b[10] * 1.8);
+        pool(m.x, m.z, 5.5, [255, 206, 150], 0.75);
+      }
+      const t = new THREE.CanvasTexture(c);
+      t.flipY = false;
+      t.colorSpace = THREE.NoColorSpace;
+      LAMP.map.value = t;
+      LAMP.box.value.set(x0, z0, 1 / (x1 - x0), 1 / (z1 - z0));
+    }
   }
   const heads = new THREE.BufferGeometry();
   heads.setAttribute('position', new THREE.Float32BufferAttribute(lamps.flatMap(([x, y, z]) => {
@@ -246,6 +262,7 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], toScene,
         if (!m) continue;
         if (m.userData?.glass && !base.glass.has(m)) base.glass.set(m, m.envMapIntensity);
         if ((m.name === 'Lamp glow') && !base.glow.has(m)) base.glow.set(m, m.emissiveIntensity);
+        if (m.userData?.nightGlow && !base.signs.has(m)) base.signs.set(m, m.userData.nightGlow);
       }
     });
   }
@@ -276,6 +293,7 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], toScene,
     moonSky.intensity = dayFill * (1 - n) + 0.42 * n;
     for (const [m, v] of base.glass) m.envMapIntensity = v * (1 - 0.9 * n) * (1 - 0.3 * g);
     for (const [m, v] of base.glow) m.emissiveIntensity = mix(v, Math.max(v, 1) * 5, L);
+    for (const [m, [d, nt]] of base.signs) m.emissiveIntensity = mix(d, nt, L);
 
     // the haze: warm at sunset, the blue hour's violet, then the night's
     scene.fog.color.copy(base.fog).lerp(duskFog, g * 0.35).lerp(blueFog, smooth(0, 0.45, n)).lerp(nightFog, smooth(0.4, 1, n));
@@ -290,8 +308,7 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], toScene,
     sky.visible = n > 0 || g > 0;
     for (const s of stars) s.material.opacity = smooth(0.45, 1, n);
     lampsGroup.visible = L > 0;
-    poolMat.opacity = 0.36 * L;
-    floodMat.opacity = 0.34 * L;
+    LAMP.k.value = 1.7 * L;
     glowMat.opacity = 0.75 * L;
     cityMat.opacity = 0.85 * L;
     changed(state);

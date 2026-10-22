@@ -13,12 +13,15 @@ import { Q } from './quality.js';
 import skyInfo from '../public/env/sky.json';
 
 const ENV = `${import.meta.env.BASE_URL}env/`;
-// daylight like the marketing renders: a warm afternoon sun, the sky's light softer (it is blue: too
-// much of it turns the brick and the white stone cold); ?sun= ?sky= ?suncolor= to compare
+// daylight like the marketing renders: a clear afternoon sun, nearly white (a yellow sun and a
+// warmed sky light made the brick and the white stone read yellow, 22.10.2026), the sky's light a
+// little blue in the shadows; the sky seen behind the blocks lighter than the light it gives, airy
+// and pale as on the renders, its clouds white; ?sun= ?sky= ?bg= ?suncolor= to compare
 const LIGHT = new URLSearchParams(location.search);
 const SKY_INTENSITY = +(LIGHT.get('sky') ?? 1.35);
+const BG_INTENSITY = +(LIGHT.get('bg') ?? 1.7);
 const SUN_INTENSITY = +(LIGHT.get('sun') ?? 3.0);
-const SUN_COLOR = LIGHT.get('suncolor') ? `#${LIGHT.get('suncolor')}` : '#fff1df';
+const SUN_COLOR = LIGHT.get('suncolor') ? `#${LIGHT.get('suncolor')}` : '#fff7ee';
 const HAZE = new THREE.Color(0xcad6e0);
 
 function rng(seed) {
@@ -107,9 +110,9 @@ function city(scene) {
     q.setFromAxisAngle(new THREE.Vector3(0, 1, 0), b.r);
     m4.compose(p.set(b.x, 0, b.z), q, s.set(b.w, b.h, b.l));
     im.setMatrixAt(i, m4);
-    // walls in a few muted tones (beige, warm grey, pale terracotta, cream, light grey): no row of
-    // identical white boxes
-    const tones = [[0.09, 0.14, 0.72], [0.08, 0.06, 0.66], [0.05, 0.2, 0.64], [0.11, 0.2, 0.76], [0.6, 0.03, 0.7], [0.07, 0.1, 0.58]];
+    // walls painted as in Dushanbe's quarters (22.10.2026: no more grey boxes): cream, peach,
+    // terracotta, dusty pink, pale blue, mint, sand, white, brick; soft, not loud
+    const tones = [[0.11, 0.42, 0.74], [0.07, 0.4, 0.72], [0.03, 0.34, 0.62], [0.97, 0.22, 0.74], [0.56, 0.24, 0.72], [0.42, 0.18, 0.7], [0.09, 0.26, 0.66], [0.08, 0.05, 0.84], [0.03, 0.36, 0.5]];
     const t = tones[Math.floor(rnd() * tones.length)];
     im.setColorAt(i, col.setHSL(t[0] + (rnd() - 0.5) * 0.02, t[1] * (0.8 + rnd() * 0.4), t[2] * (0.94 + rnd() * 0.1)));
   });
@@ -133,9 +136,9 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
   scene.environmentRotation.set(0, SKY_TURN, 0);
 
   // aerial perspective: the city a kilometre out a little hazy, the complex (100-400 m) clear
-  scene.fog = new THREE.FogExp2(HAZE.getHex(), +(LIGHT.get('fog') ?? 0.00042));
+  scene.fog = new THREE.FogExp2(HAZE.getHex(), +(LIGHT.get('fog') ?? 0.0003));
   scene.background = new THREE.Color(0xb9cde0);
-  scene.backgroundIntensity = SKY_INTENSITY;
+  scene.backgroundIntensity = BG_INTENSITY;
   scene.environmentIntensity = SKY_INTENSITY;
 
   const sun = new THREE.DirectionalLight(new THREE.Color(SUN_COLOR), SUN_INTENSITY);
@@ -169,18 +172,19 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
   const pmrem = new THREE.PMREMGenerator(renderer);
   const hdr = new RGBELoader().setDataType(THREE.FloatType);
   const sky = (res) => hdr.loadAsync(`${ENV}sky_${res}.hdr`).then((t) => ((t.mapping = THREE.EquirectangularReflectionMapping), t));
-  // the light of the sky on the buildings: the HDRI's blue taken half out and a touch of warmth put
-  // in (the renders' white stone is white, not blue-grey); the background keeps the real sky
+  // the light of the sky on the buildings: part of the HDRI's blue taken out (the renders' white
+  // stone is white, not blue-grey), no warmth added (it turned the facades yellow); the background
+  // keeps the real sky
   const neutral = (t) => {
     const src = t.image.data, n = src.length / 4;
     const out = new Float32Array(src.length);
-    const K = +(LIGHT.get('skysat') ?? 0.45);
+    const K = +(LIGHT.get('skysat') ?? 0.55);
     for (let i = 0; i < n; i++) {
       const r = src[i * 4], g = src[i * 4 + 1], b = src[i * 4 + 2];
       const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      out[i * 4] = (l + (r - l) * K) * 1.04;
+      out[i * 4] = l + (r - l) * K;
       out[i * 4 + 1] = l + (g - l) * K;
-      out[i * 4 + 2] = (l + (b - l) * K) * 0.94;
+      out[i * 4 + 2] = l + (b - l) * K;
       out[i * 4 + 3] = 1;
     }
     const e = new THREE.DataTexture(out, t.image.width, t.image.height, THREE.RGBAFormat, THREE.FloatType);
@@ -201,7 +205,7 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
         n++;
       }
     }
-    const k = SKY_INTENSITY / n;
+    const k = BG_INTENSITY / n; // the haze as bright as the sky seen at the horizon
     scene.fog.color.setRGB(c[0] * k, c[1] * k, c[2] * k);
   };
   const ready = after

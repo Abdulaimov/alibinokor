@@ -92,7 +92,9 @@ function noiseCanvas(size, base, spots) {
 // slightly rounded arrises) and a roughness map. kind 'tan' (the sandy multi-tone facing brick) or
 // 'dark' (the graphite brick of the base).
 const BRICK = {
-  tan: { mortar: [226, 216, 200], shades: [[240, 202, 148, 24], [232, 184, 124, 24], [218, 166, 118, 16], [200, 146, 100, 12], [168, 118, 84, 7], [246, 218, 172, 17]] },
+  // the renders' facing brick: caramel to warm brown, a few light and a few dark bricks (sRGB; the
+  // earlier sandy set, 232/190/135 on average, read pale yellow on the site), light grey joints
+  tan: { mortar: [204, 198, 188], shades: [[204, 158, 117, 24], [190, 142, 104, 22], [214, 172, 132, 16], [174, 126, 93, 14], [152, 108, 80, 8], [224, 188, 148, 12], [196, 150, 118, 4]] },
   dark: { mortar: [112, 112, 114], shades: [[77, 77, 80, 30], [90, 90, 93, 28], [67, 67, 70, 22], [104, 104, 108, 12], [58, 58, 61, 8]] },
 };
 const brickCache = new Map();

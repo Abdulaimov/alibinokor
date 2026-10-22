@@ -43,3 +43,4 @@ export function planFrame(t) {
   };
 }
 export const LAMPS = complex.lamps ?? [];
+export const SHOPS = complex.shops ?? [];

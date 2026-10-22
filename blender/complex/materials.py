@@ -54,6 +54,12 @@ SPECS = {
     'Metal': ('#7d8288', 0.35, 0.8, {}),
     'Neighbour': ('#d6d7d6', 0.85, 0.0, {}),   # context blocks: plain light grey massing, opaque
     'Neighbour solid': ('#e9e7e3', 0.7, 0.0, {}),
+    # the houses across the roads, each in its own paint (22.10.2026: they were all grey)
+    'Neighbour cream': ('#ecd9a8', 0.7, 0.0, {}),
+    'Neighbour peach': ('#eac2a0', 0.7, 0.0, {}),
+    'Neighbour blue': ('#bccfdc', 0.7, 0.0, {}),
+    'Neighbour mint': ('#c4d9c4', 0.7, 0.0, {}),
+    'Neighbour rose': ('#e3b9b0', 0.7, 0.0, {}),
     'Car': ('#d8dade', 0.3, 0.5, {}),
     'Car dark': ('#2a2e33', 0.3, 0.5, {}),
     'Car red': ('#b02a2a', 0.3, 0.5, {}),

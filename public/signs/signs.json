@@ -1,0 +1,28 @@
+{
+  "about": "Shop signs over the shop windows (src/signs.js). 'set' is the one shown; ?signs=neutral in the address shows another. A sign: block (A-D), face and bay as exported by the build (model/complex.json shops: the street faces' portals, left to right), span (how many portals it covers), file (artwork in this folder: white letters on transparent, any width), height in metres. BOSS and LACOSTE are the developer's wish for the concept, not confirmed tenants: the public video uses 'neutral'.",
+  "set": "brands",
+  "sets": {
+    "brands": [
+      { "block": "B", "face": 14, "bay": 1, "span": 1, "file": "boss.png", "height": 0.62 },
+      { "block": "V", "face": 14, "bay": 1, "span": 2, "file": "lacoste.png", "height": 0.52 },
+      { "block": "B", "face": 13, "bay": 1, "span": 1, "file": "cafe.png", "height": 0.58 },
+      { "block": "B", "face": 15, "bay": 1, "span": 1, "file": "optics.png", "height": 0.5 },
+      { "block": "V", "face": 15, "bay": 2, "span": 2, "file": "beauty.png", "height": 0.52 },
+      { "block": "G", "face": 19, "bay": 1, "span": 2, "file": "fashion.png", "height": 0.5 },
+      { "block": "G", "face": 23, "bay": 2, "span": 2, "file": "boutique.png", "height": 0.52 },
+      { "block": "D", "face": 19, "bay": 2, "span": 1, "file": "cafe.png", "height": 0.58 },
+      { "block": "D", "face": 23, "bay": 1, "span": 2, "file": "store.png", "height": 0.52 }
+    ],
+    "neutral": [
+      { "block": "B", "face": 14, "bay": 1, "span": 1, "file": "boutique.png", "height": 0.52 },
+      { "block": "V", "face": 14, "bay": 1, "span": 2, "file": "fashion.png", "height": 0.5 },
+      { "block": "B", "face": 13, "bay": 1, "span": 1, "file": "cafe.png", "height": 0.58 },
+      { "block": "B", "face": 15, "bay": 1, "span": 1, "file": "optics.png", "height": 0.5 },
+      { "block": "V", "face": 15, "bay": 2, "span": 2, "file": "beauty.png", "height": 0.52 },
+      { "block": "G", "face": 19, "bay": 1, "span": 2, "file": "store.png", "height": 0.52 },
+      { "block": "G", "face": 23, "bay": 2, "span": 2, "file": "boutique.png", "height": 0.52 },
+      { "block": "D", "face": 19, "bay": 2, "span": 1, "file": "cafe.png", "height": 0.58 },
+      { "block": "D", "face": 23, "bay": 1, "span": 2, "file": "fashion.png", "height": 0.5 }
+    ]
+  }
+}

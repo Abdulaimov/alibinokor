@@ -42,7 +42,7 @@ for (const [name, v] of Object.entries(VIEWS)) {
   if (only.length && !only.includes(name)) continue;
   await page.evaluate(async (v) => {
     const app = window.__app;
-    for (const id of ['ext-ui', 'labels', 'places', 'tooltip', 'quality']) {
+    for (const id of ['ext-ui', 'labels', 'places', 'tooltip', 'quality', 'daytime', 'eye', 'hint']) {
       const el = document.getElementById(id);
       if (el) el.style.visibility = v.ui ? '' : 'hidden';
     }

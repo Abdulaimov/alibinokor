@@ -1,7 +1,7 @@
 // The high level's frame passes, loaded only on that level (a separate chunk: phones never download it).
-//   scene -> 4x MSAA, half-float -> ambient occlusion (N8AO) -> tone mapping -> screen
+//   scene -> 4x MSAA, half-float -> ambient occlusion (N8AO) -> [bloom, at dusk and night] -> tone mapping -> screen
 import * as THREE from 'three';
-import { EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode } from 'postprocessing';
+import { BloomEffect, EffectComposer, EffectPass, RenderPass, ToneMappingEffect, ToneMappingMode } from 'postprocessing';
 import { N8AOPostPass } from 'n8ao';
 
 const MODES = { agx: ToneMappingMode.AGX, neutral: ToneMappingMode.NEUTRAL, aces: ToneMappingMode.ACES_FILMIC };
@@ -23,6 +23,11 @@ export function postPipeline(renderer, scene, camera, tone) {
     color: new THREE.Color(0x0b0d10),
   });
   composer.addPass(ao);
+  // the glow round the lamps, the lit windows and the signs at night (off by day: no cost)
+  const bloom = new BloomEffect({ intensity: 0, luminanceThreshold: 0.85, luminanceSmoothing: 0.3, mipmapBlur: true, radius: 0.72, levels: 7 });
+  const bloomPass = new EffectPass(camera, bloom);
+  bloomPass.enabled = false;
+  composer.addPass(bloomPass);
   composer.addPass(new EffectPass(camera, new ToneMappingEffect({ mode: MODES[tone] })));
   composer.setSize(innerWidth, innerHeight);
   return {
@@ -38,5 +43,9 @@ export function postPipeline(renderer, scene, camera, tone) {
       ao.configuration.intensity = on ? 2.4 : 2.2;
     },
     ao,
+    bloom: (k) => {
+      bloom.intensity = k;
+      bloomPass.enabled = k > 0.01;
+    },
   };
 }

@@ -10,6 +10,45 @@ import { alphaTexture, brickTextures, groundTexture } from './textures.js';
 const BASE = `${import.meta.env.BASE_URL}textures/`;
 // lights on at dusk and at night, 0..1 (src/night.js): the windows of the complex and of the city
 export const NIGHT = { value: 0 };
+
+// The light of the street lamps, the pitch's floodlights and the shop windows at night: a map of it
+// seen from above (src/night.js draws it from the lamps' places), added on every lit surface by its
+// colour, fading with height (the ground, the paths, benches, trees, people, cars and the lower
+// floors are lit; the flats above are not). Every standard material gets it (the prototype's hook
+// below; the materials with a hook of their own call lampChunk too). k = 0 by day.
+export const LAMP = {
+  map: { value: new THREE.DataTexture(new Uint8Array(4), 1, 1) },
+  box: { value: new THREE.Vector4(0, 0, 1, 1) }, // scene x0, z0, 1 / width, 1 / depth (m)
+  k: { value: 0 },
+};
+LAMP.map.value.needsUpdate = true;
+export function lampChunk(sh) {
+  if (sh.vertexShader.includes('vLampW')) return;
+  sh.uniforms.uLampMap = LAMP.map;
+  sh.uniforms.uLampBox = LAMP.box;
+  sh.uniforms.uLampK = LAMP.k;
+  sh.vertexShader = sh.vertexShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vLampW;')
+    .replace('#include <project_vertex>', `#include <project_vertex>
+      {
+        vec4 lw = vec4(transformed, 1.0);
+        #ifdef USE_INSTANCING
+          lw = instanceMatrix * lw;
+        #endif
+        vLampW = (modelMatrix * lw).xyz;
+      }`);
+  sh.fragmentShader = sh.fragmentShader
+    .replace('#include <common>', '#include <common>\nvarying vec3 vLampW;\nuniform sampler2D uLampMap;\nuniform vec4 uLampBox;\nuniform float uLampK;')
+    .replace('#include <emissivemap_fragment>', `#include <emissivemap_fragment>
+      if (uLampK > 0.0) {
+        vec2 luv = (vLampW.xz - uLampBox.xy) * uLampBox.zw;
+        if (luv.x > 0.0 && luv.y > 0.0 && luv.x < 1.0 && luv.y < 1.0) {
+          float fall = 1.0 - smoothstep(0.3, 10.0, vLampW.y);
+          totalEmissiveRadiance += diffuseColor.rgb * texture2D(uLampMap, luv).rgb * uLampK * fall;
+        }
+      }`);
+}
+THREE.MeshStandardMaterial.prototype.onBeforeCompile = lampChunk;
 const loader = new THREE.TextureLoader();
 const sources = new Map(); // `${set}/${kind}` -> Promise<Texture> (one download / GPU upload per file)
 let anisotropy = 8;
@@ -180,6 +219,7 @@ function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, faca
   if (!vary && !detile && !leafy && !facade && !interior) return;
   const tintColor = new THREE.Color(tint ?? '#ffffff');
   mat.onBeforeCompile = (sh) => {
+    lampChunk(sh);
     sh.uniforms.uVary = { value: vary };
     sh.uniforms.uTint = { value: tintColor };
     sh.uniforms.uFacade = { value: new THREE.Vector3(...(facade ?? [3, 3, 0])) };
@@ -283,15 +323,17 @@ const LIB = {
   'Window glass': { ...glass('#000000', 0.03, { env: 0.9, tint: '#c4d4dc', interior: [2.9, 3.5, 4.2, 12.0, 0.17, 0.26, 0.012, 0.1, 0.6] }), physical: { ior: 1.6 } },
   // block A (renders 1, 2, 4): dark blue-green coated glass, the rooms behind it readable (curtains,
   // furniture, a light here and there), the sky in it strongest towards the top and at grazing angles
-  'Tower glass': { ...glass('#000000', 0.02, { env: 1.5, tint: '#9db8c8', interior: [3.2, 3.75, 6.0, 12.0, 0.19, 0.36, 0.006, 0.28, 0.95], specular: '#d6e3ec' }), physical: { ior: 2.1 } },
+  // (22.10.2026: darker, as on renders 1, 2 and 4: a charcoal-blue body, the sky in it, not a pale blue face)
+  'Tower glass': { ...glass('#000000', 0.02, { env: 1.0, tint: '#8199aa', interior: [3.2, 3.75, 6.0, 12.0, 0.15, 0.3, 0.006, 0.2, 0.8], specular: '#d6e3ec' }), physical: { ior: 2.1 } },
   'Strip dark': { color: '#3e3934', roughness: 0.55, metalness: 0.25, env: 0.6 },
   // the slab blocks (renders 1-3): golden sandstone cornices and bay frames; the narrow tall
   // glazing light grey, the dark strips dark green, the corner bays blue
   'Stone pale': { set: 'plaster', mapless: true, tile: 2.2, color: '#b8bbbe', roughness: 0.7, normal: 0.25, env: 0.6 },
-  'Stone gold': { set: 'plaster', mapless: true, tile: 2.2, color: '#e8c08a', roughness: 0.7, normal: 0.35, vary: 0.03, env: 0.6 },
+  // the cornice bands: bronze-gold as on the renders (the earlier #e8c08a was the yellowest thing on the facade)
+  'Stone gold': { set: 'plaster', mapless: true, tile: 2.2, color: '#c69c68', roughness: 0.62, normal: 0.35, vary: 0.03, env: 0.6 },
   'Glass light': { ...glass('#000000', 0.03, { env: 1.4, tint: '#e6edf0', interior: [1.6, 3.5, 3.5, 12.0, 0.5, 0.75, 0.008, 0.45, 1.15] }), physical: { ior: 1.9 } },
   'Glass dark': { ...glass('#000000', 0.03, { env: 1.0, tint: '#b3a69c', interior: [1.2, 3.5, 2.5, 12.0, 0.2, 0.3, 0.006, 0.32, 0.75] }), physical: { ior: 2.0 } },
-  'Bay glass': { ...glass('#000000', 0.03, { env: 1.35, tint: '#8fd2e6', interior: [2.0, 3.5, 3.5, 12.0, 0.42, 0.6, 0.008, 0.35, 1.1], specular: '#cfeaf2' }), physical: { ior: 2.1 } },
+  'Bay glass': { ...glass('#000000', 0.03, { env: 1.15, tint: '#8db0c6', interior: [2.0, 3.5, 3.5, 12.0, 0.36, 0.55, 0.008, 0.3, 1.0], specular: '#d2e2ea' }), physical: { ior: 2.1 } },
   // Ali Binokor facades (renders 1-4): tan facing brick, dark grey brick, white stone crown
   // facing brick drawn in the browser (textures.js brickTextures): sandy multi-tone and graphite
   'Brick tan': { brick: 'tan', tile: 2.0, color: '#ffffff', roughness: 1, normal: 0.8, vary: 0.04, env: 0.45 },
@@ -395,6 +437,11 @@ const LIB = {
   // height, bay width, roof level, metres)
   Neighbour: { set: 'plaster', tile: 3, color: '#d9cfc0', roughness: 0.92, normal: 0.25, vary: 0.04, env: 0.6, facade: [3.0, 3.3, 48] },
   'Neighbour solid': { set: 'plaster', tile: 3, color: '#e3d9c9', roughness: 0.92, normal: 0.3, vary: 0.04, env: 0.6, facade: [3.0, 3.2, 15] },
+  'Neighbour cream': { set: 'plaster', tile: 3, color: '#e8d4a2', roughness: 0.92, normal: 0.3, vary: 0.04, env: 0.6, facade: [3.0, 3.2, 15] },
+  'Neighbour peach': { set: 'plaster', tile: 3, color: '#e6bd9b', roughness: 0.92, normal: 0.3, vary: 0.04, env: 0.6, facade: [3.0, 3.2, 15] },
+  'Neighbour blue': { set: 'plaster', tile: 3, color: '#b8cbd8', roughness: 0.92, normal: 0.3, vary: 0.04, env: 0.6, facade: [3.0, 3.2, 15] },
+  'Neighbour mint': { set: 'plaster', tile: 3, color: '#c0d5bf', roughness: 0.92, normal: 0.3, vary: 0.04, env: 0.6, facade: [3.0, 3.2, 15] },
+  'Neighbour rose': { set: 'plaster', tile: 3, color: '#dfb5ab', roughness: 0.92, normal: 0.3, vary: 0.04, env: 0.6, facade: [3.0, 3.2, 15] },
   // plants in the model (balcony planters, hedges, deck planting)
   Shrub: { color: '#3c5a26', roughness: 0.95, leafy: true, env: 0.35 },
   Leaves: { color: '#36531f', roughness: 0.95, leafy: true, env: 0.35 },

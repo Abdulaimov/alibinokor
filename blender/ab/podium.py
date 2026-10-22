@@ -19,6 +19,11 @@ from . import config
 
 PEOPLE = []     # [x, y, z, kind] site metres, filled by build_base
 TREES = []      # trees on the podium roof: [x, y, z, h, r, kind]
+# the shop portals on the street faces, where a sign can go on the dark frieze over the glass (the
+# viewer's sign layer, src/signs.js): [block, face, bay, x0, y0, x1, y1, z0, z1, nx, ny] site metres,
+# the bay's ends on the facade plane, the frieze's band, the way the face looks
+SHOPS = []
+_block = None   # the block being built (build_base), for site coordinates
 # floor heights of the block being built (build_base sets them: the tower's podium is taller)
 GROUND, SECOND = config.GROUND, config.SECOND
 TOP = GROUND + SECOND   # roof of the podium / level of floor 3
@@ -65,10 +70,12 @@ def shop_front(mb, outline, rnd, key=None):
     pts = ring_coords(outline)
     glass_top = TOP - 2.1
     posters = POSTERS.get(key, [])
+    faces = -1
     for a, b in zip(pts, pts[1:] + pts[:1]):
         L = math.dist(a, b)
         if L < 0.3:
             continue
+        faces += 1
         ux, uy = (b[0] - a[0]) / L, (b[1] - a[1]) / L
         nx, ny = uy, -ux
         rot = math.atan2(uy, ux)
@@ -101,6 +108,11 @@ def shop_front(mb, outline, rnd, key=None):
                 bx(s0 - 0.15, s1 + 0.15, 0.0, 0.45, 2.4, TOP + 1.6, 'Shop frame')
                 poster(mb, P(s0 + 0.1, 0.48), P(s1 - 0.1, 0.48), 2.7, TOP + 1.3, 0, 0, off=0.0)
                 continue
+            if street:
+                q0, q1, qn = to_site(_block, *P(s0)), to_site(_block, *P(s1)), to_site(_block, *P(sm, 1.0))
+                qm = to_site(_block, *P(sm))
+                SHOPS.append([key, faces, k, round(q0[0], 3), round(q0[1], 3), round(q1[0], 3), round(q1[1], 3),
+                              round(glass_top + 0.3, 3), round(TOP - 1.0, 3), round(qn[0] - qm[0], 4), round(qn[1] - qm[1], 4)])
             # white portal: jambs (outer half stops 1.5 m short of the top: the step), head
             fr = 0.35
             for js in (s0, s1 - fr):
@@ -274,7 +286,8 @@ def entrances(mb, b, plan, base):
 
 
 def build_base(key, b, plan, mats, col, put, podium_site=None):
-    global GROUND, SECOND, TOP
+    global GROUND, SECOND, TOP, _block
+    _block = b
     GROUND, SECOND, _ = config.dims(b)
     TOP = GROUND + SECOND
     rnd = random.Random(zlib.crc32(key.encode()) & 0xffff)   # (str hash() changes from run to run)

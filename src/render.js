@@ -36,6 +36,7 @@ export function createPipeline(renderer, scene, camera) {
     render: () => renderer.render(scene, camera),
     setSize: (w, h) => renderer.setSize(w, h),
     walk: () => {},
+    bloom: () => {},
     ao: null,
     ready: Promise.resolve(),
   };
