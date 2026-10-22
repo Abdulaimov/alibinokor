@@ -181,9 +181,10 @@ const INTERIOR = /* glsl */ `
       // daylight from the window falls off into the room
       col *= mix(1.0, 0.35, clamp(h.z / D, 0.0, 1.0));
       // a few rooms have the lights on by day, nearly half at night (warm; some cooler, a TV's blue)
-      float lit = step(mix(0.972, 0.56, uNight), r1);
-      vec3 lamp = mix(vec3(0.62, 0.52, 0.38), vec3(0.5, 0.52, 0.56), step(0.8, r3) * uNight) * (1.0 + 1.3 * uNight);
-      vec3 light = mix(vec3(uInt2.x * (1.0 - 0.94 * uNight)), lamp, lit);
+      float lit = step(mix(0.972, 1.0 - uNightLamp.w, uNight), r1);
+      vec3 lamp = mix(uNightLamp.rgb, vec3(0.5, 0.52, 0.56), step(0.8, r3) * uNight) * (1.0 + 1.3 * uNight);
+      // the unlit rooms at night: dark, or (the glass tower, its night render) the glass's own teal glow
+      vec3 light = mix(vec3(uInt2.x * (1.0 - 0.94 * uNight)) + uNightLamp.rgb * uNightDim * uNight, lamp, lit);
       if (lit > 0.5 && t != tm.z && d.y > 0.0) col = vec3(1.0, 0.94, 0.82);   // the lit ceiling
       vec3 room = col * light;
       // curtains half drawn, or blinds let down, just behind the glass
@@ -215,7 +216,7 @@ const INTERIOR = /* glsl */ `
     }
   }`;
 
-function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, facade = null, interior = null } = {}) {
+function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, facade = null, interior = null, night = null } = {}) {
   if (!vary && !detile && !leafy && !facade && !interior) return;
   const tintColor = new THREE.Color(tint ?? '#ffffff');
   mat.onBeforeCompile = (sh) => {
@@ -230,6 +231,10 @@ function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, faca
     sh.uniforms.uMirror = { value: it[7] ?? 0.1 };
     sh.uniforms.uRefl = { value: it[8] ?? 0.9 };
     sh.uniforms.uNight = NIGHT;
+    // the rooms' light at night: colour and the share of rooms lit; the glow of the unlit ones
+    const nl = new THREE.Color(night?.lamp ?? '#9e8561');
+    sh.uniforms.uNightLamp = { value: new THREE.Vector4(nl.r, nl.g, nl.b, night?.share ?? 0.44) };
+    sh.uniforms.uNightDim = { value: night?.dim ?? 0 };
     sh.vertexShader = sh.vertexShader
       .replace('#include <common>', '#include <common>\nvarying vec3 vWorldPos;\nvarying vec3 vWorldNormal;')
       .replace('#include <worldpos_vertex>', `#include <worldpos_vertex>
@@ -243,7 +248,7 @@ function patch(mat, { vary = 0, detile = false, leafy = false, tint = null, faca
           on = mat3(instanceMatrix) * on; // the typical floors are instances, turned with their block
         #endif
         vWorldNormal = normalize(mat3(modelMatrix) * on);`);
-    let frag = sh.fragmentShader.replace('#include <common>', `#include <common>\nvarying vec3 vWorldPos;\nvarying vec3 vWorldNormal;\nuniform float uVary;\nuniform vec3 uTint;\nuniform vec3 uFacade;\nuniform vec4 uInt;\nuniform vec3 uInt2;\nuniform float uMirror;\nuniform float uRefl;\nuniform float uNight;\n${NOISE}`);
+    let frag = sh.fragmentShader.replace('#include <common>', `#include <common>\nvarying vec3 vWorldPos;\nvarying vec3 vWorldNormal;\nuniform float uVary;\nuniform vec3 uTint;\nuniform vec3 uFacade;\nuniform vec4 uInt;\nuniform vec3 uInt2;\nuniform float uMirror;\nuniform float uRefl;\nuniform float uNight;\nuniform vec4 uNightLamp;\nuniform float uNightDim;\n${NOISE}`);
     if (detile) {
       frag = frag.replace('#include <map_fragment>', `
         #ifdef USE_MAP
@@ -324,7 +329,8 @@ const LIB = {
   // block A (renders 1, 2, 4): dark blue-green coated glass, the rooms behind it readable (curtains,
   // furniture, a light here and there), the sky in it strongest towards the top and at grazing angles
   // (22.10.2026: darker, as on renders 1, 2 and 4: a charcoal-blue body, the sky in it, not a pale blue face)
-  'Tower glass': { ...glass('#000000', 0.02, { env: 1.0, tint: '#8199aa', interior: [3.2, 3.75, 6.0, 12.0, 0.15, 0.3, 0.006, 0.2, 0.8], specular: '#d6e3ec' }), physical: { ior: 2.1 } },
+  // at night (the tower's night render): most rooms lit, the light and the glass teal
+  'Tower glass': { ...glass('#000000', 0.02, { env: 1.35, tint: '#97b0c2', interior: [3.2, 3.75, 6.0, 12.0, 0.2, 0.36, 0.006, 0.3, 1.05], specular: '#d6e3ec', night: { lamp: '#4fa9b6', share: 0.6, dim: 0.14 } }), physical: { ior: 2.1 } },
   'Strip dark': { color: '#3e3934', roughness: 0.55, metalness: 0.25, env: 0.6 },
   // the slab blocks (renders 1-3): golden sandstone cornices and bay frames; the narrow tall
   // glazing light grey, the dark strips dark green, the corner bays blue

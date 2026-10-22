@@ -15,6 +15,9 @@ def build_roof(mb, b, plan, zr):
     else:
         from . import slab
         slab.build_roof(mb, b, plan, zr)
+    # the facade lighting at night (the viewer shows it at dusk and at night)
+    from .night import night_lights
+    night_lights(mb, b, plan, zr)
 
 
 def plant_rooms(mb, plan, zr, mat):

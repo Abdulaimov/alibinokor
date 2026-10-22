@@ -61,9 +61,11 @@ const DOME_FRAG = /* glsl */ `
     dusk += vec3(1.2, 0.5, 0.12) * pow(toSun, 8.0) * exp(-max(h, 0.0) * 7.0);
     dusk *= mix(1.0, 0.22, smoothstep(0.0, 0.7, uNight));
     // night: near black above, the city's glow low on the horizon
-    vec3 nightTop = vec3(0.008, 0.012, 0.03), nightLow = vec3(0.07, 0.075, 0.11);
-    vec3 night = mix(nightLow, nightTop, smoothstep(0.0, 0.35, h));
-    night += vec3(0.16, 0.1, 0.06) * exp(-max(h, 0.0) * 26.0) * 0.5;
+    // the night of the client's night renders: a deep blue sky (not black), lighter and greyer low
+    // down, the city's warm glow on the horizon
+    vec3 nightTop = vec3(0.006, 0.02, 0.055), nightLow = vec3(0.05, 0.085, 0.14);
+    vec3 night = mix(nightLow, nightTop, smoothstep(0.0, 0.45, h));
+    night += vec3(0.2, 0.12, 0.08) * exp(-max(h, 0.0) * 22.0) * 0.5;
     vec3 col = mix(dusk, night, smoothstep(0.3, 1.0, uNight));
     // the moon, a soft halo round it
     float m = dot(d, uMoon);
@@ -255,7 +257,58 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = 
   const sunWarm = new THREE.Color(0xffa565), moonC = new THREE.Color(0xb4c4ff);
   const duskFog = new THREE.Color(0xd9a588), blueFog = new THREE.Color(0x3a3a52), nightFog = new THREE.Color(0x0b0f19);
 
+  // ---------- the facade lighting (blender/ab/night.py): uplights and LED lines ----------
+  // an uplight's beam: brightest at the fixture, fading up to the next band, softer at its sides
+  // (glTF UVs: v = 1 at the fixture)
+  const beam = (() => {
+    const c = document.createElement('canvas');
+    c.width = 64;
+    c.height = 256;
+    const g = c.getContext('2d'), img = g.createImageData(64, 256);
+    for (let y = 0; y < 256; y++) {
+      const v = 1 - y / 255; // 0 at the fixture (the canvas' top row: uv.y = 1)
+      const along = 0.18 + 0.82 * Math.exp(-2.6 * v) + 0.9 * Math.exp(-v * 60);
+      for (let x = 0; x < 64; x++) {
+        const u = Math.abs(x / 63 - 0.5) * 2;
+        const across = Math.pow(Math.cos(Math.min(1, u) * Math.PI / 2), 1.4);
+        const k = Math.min(1, along * across * 0.62);
+        const i = (y * 64 + x) * 4;
+        img.data[i] = img.data[i + 1] = img.data[i + 2] = Math.round(255 * k);
+        img.data[i + 3] = 255;
+      }
+    }
+    g.putImageData(img, 0, 0);
+    const t = new THREE.CanvasTexture(c);
+    t.colorSpace = THREE.NoColorSpace;
+    return t;
+  })();
+  // a beam lights the wall it falls on: its colour multiplies what is there (out = wall * (1 + beam))
+  const washMat = (color) => new THREE.MeshBasicMaterial({
+    map: beam, color, transparent: true, depthWrite: false, fog: false, toneMapped: false,
+    blending: THREE.CustomBlending, blendEquation: THREE.AddEquation, blendSrc: THREE.DstColorFactor, blendDst: THREE.OneFactor,
+    polygonOffset: true, polygonOffsetFactor: -2,
+  });
+  const facade = {
+    wash: washMat(new THREE.Color()), white: washMat(new THREE.Color()),
+    line: new THREE.MeshBasicMaterial({ color: 0xffffff, fog: false, toneMapped: false, side: THREE.DoubleSide }),
+    meshes: [],
+  };
+  const WARM = new THREE.Color(1.0, 0.56, 0.24), COOL = new THREE.Color(0.95, 0.97, 1.0);
+
   function collect() {
+    // the facade lighting's meshes take the night materials (hidden by day)
+    scene.traverse((o) => {
+      if (!o.isMesh || o.userData.facadeLight) return;
+      const n = o.material?.name;
+      const m = n === 'Night wash' ? facade.wash : n === 'Night white' ? facade.white : n === 'Night line' ? facade.line : null;
+      if (!m) return;
+      o.material = m;
+      o.castShadow = o.receiveShadow = false;
+      o.renderOrder = 4;
+      o.raycast = () => {};
+      o.userData.facadeLight = true;
+      facade.meshes.push(o);
+    });
     // the glass (it reflects the real sky through its own map) and the lamp heads, as loaded
     scene.traverse((o) => {
       for (const m of [o.material].flat()) {
@@ -309,6 +362,10 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = 
     for (const s of stars) s.material.opacity = smooth(0.45, 1, n);
     lampsGroup.visible = L > 0;
     LAMP.k.value = 1.7 * L;
+    for (const o of facade.meshes) o.visible = L > 0.01;
+    facade.wash.color.copy(WARM).multiplyScalar(30 * L);
+    facade.white.color.copy(COOL).multiplyScalar(28 * L);
+    facade.line.color.setScalar(2.6 * L);
     glowMat.opacity = 0.75 * L;
     cityMat.opacity = 0.85 * L;
     changed(state);

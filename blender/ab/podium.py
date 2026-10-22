@@ -62,6 +62,12 @@ PORTAL = 3.3     # a shop portal: 2.6 m of glass between two white jambs of 0.35
 PIER = 1.2       # dark stone pier between the portals (bay pitch 4.5 m, renders 1 and 3)
 
 
+def night_wash(mb, a, b, z0, z1):
+    """a warm uplight's beam on a stone face from plan point a to b (UVs: v 0 at the fixture)"""
+    if z1 - z0 > 0.3:
+        mb.face([(*a, z0), (*b, z0), (*b, z1), (*a, z1)], 'Night wash', [(0, 0), (1, 0), (1, 1), (0, 1)])
+
+
 def shop_front(mb, outline, rnd, key=None):
     """Brick blocks (renders 1 and 3): dark graphite stone piers; in each bay a window two storeys
     high in a white stone portal stepped in near its top (the jambs' outer half stops 1.5 m short),
@@ -118,6 +124,12 @@ def shop_front(mb, outline, rnd, key=None):
             for js in (s0, s1 - fr):
                 bx(js, js + fr, -0.02, 0.22, 0.0, glass_top + 0.3, 'Stone white')
                 bx(js + (0 if js == s0 else fr / 2), js + (fr / 2 if js == s0 else fr), 0.22, 0.42, 0.0, glass_top - 1.5, 'Stone white')
+                # at night a warm uplight on each jamb (the night renders)
+                ho = (js, js + fr / 2) if js == s0 else (js + fr / 2, js + fr)
+                ii = (js + fr / 2, js + fr) if js == s0 else (js, js + fr / 2)
+                night_wash(mb, P(ho[0], 0.432), P(ho[1], 0.432), 0.05, glass_top - 1.5)
+                night_wash(mb, P(ii[0], 0.232), P(ii[1], 0.232), 0.05, glass_top + 0.3)
+                night_wash(mb, P(ho[0], 0.232), P(ho[1], 0.232), glass_top - 1.5, glass_top + 0.3)
             bx(s0, s1, -0.02, 0.22, glass_top, glass_top + 0.3, 'Stone white')
             # the window: glass set back, a dark transom at the second floor, two mullions, doors
             g0, g1 = s0 + fr, s1 - fr
@@ -134,6 +146,9 @@ def shop_front(mb, outline, rnd, key=None):
         # the frieze: a slim white line, a dark stone cornice at the podium roof
         bx(0.0, L, -0.02, 0.12, TOP - 1.0, TOP - 0.92, 'Stone white')
         bx(0.0, L, -0.05, 0.3, TOP - 0.25, TOP + 0.05, 'Stone dark')
+        # LED lines at night along both (the night renders)
+        mb.quad_wall(P(0.0, 0.127), P(L, 0.127), TOP - 0.99, TOP - 0.93, 'Night line')
+        mb.quad_wall(P(0.0, 0.307), P(L, 0.307), TOP - 0.05, TOP + 0.03, 'Night line')
 
 
 def glass_front(mb, outline, rnd):
@@ -178,6 +193,9 @@ def glass_front(mb, outline, rnd):
     for z0, z1, out in ((GROUND - 0.35, GROUND + 0.6, 0.9), (TOP - 0.9, TOP + 0.45, 1.3)):
         bandp = soft.buffer(out, join_style='round').difference(soft.buffer(-0.3, join_style='round'))
         mb.prism_chamfer(bandp, z0, z1, 'White band', 'White band', 'White band', c=0.06)
+        # an LED line along each band at night (the night render of the tower)
+        lp = ring_coords(soft.buffer(out + 0.012, join_style='round'))
+        mb.ribbon(lp, z1 - 0.16, z1 - 0.08, 'Night line', closed=True)
 
 
 SIGNS = ['Sign white', 'Sign warm', 'Sign blue', 'Sign green', 'Sign red']

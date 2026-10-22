@@ -56,6 +56,10 @@ AB_SPECS = {
     'Stone beige': ('#e0c08e', 0.7, 0.0, {}),
     'Screen dark': ('#3a3c40', 0.6, 0.4, {}),
     'Poster': ('#ffffff', 0.5, 0.0, {}),
+    # the facade lighting at night (blender/ab/night.py; the viewer replaces these: src/night.js)
+    'Night wash': ('#ffa04a', 1.0, 0.0, {'emission': ('#ffa04a', 1.0)}),
+    'Night white': ('#ffffff', 1.0, 0.0, {'emission': ('#ffffff', 1.0)}),
+    'Night line': ('#ffffff', 1.0, 0.0, {'emission': ('#ffffff', 2.0)}),
     'Stair glass': ('#3d6f86', 0.05, 0.0, {}),
     # block A's corner loggias (render 4): dark grey render inside, a light grey slab edge
     'Loggia wall': ('#4a4d52', 0.8, 0.0, {}),
