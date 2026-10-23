@@ -158,7 +158,7 @@
 
 ```bash
 npm run dev -- --port 5191 &
-node tools/ab/tv_film.mjs build/tv_day --variant day            # кадры (≈8 мин на M5)
+node tools/ab/tv_film.mjs build/tv_day --variant day --samples 6   # кадры: каждый — среднее 6 проходов (≈26 мин на M5; Mac не должен засыпать: caffeinate -i)
 node tools/ab/tv_film.mjs build/tv_daynight --variant daynight
 FFMPEG=/path/to/ffmpeg tools/ab/py tools/ab/tv_cut.py build/tv_day film_4k.mp4 film_hd.mp4
 node tools/ab/tv_film.mjs build/tv_preview --w 960 --h 540 --every 30   # быстрый черновик

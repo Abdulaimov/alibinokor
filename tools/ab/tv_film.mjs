@@ -90,6 +90,8 @@ for (const s of shots) {
   fs.mkdirSync(dir, { recursive: true });
   const frames = Math.round(s.dur * FPS);
   for (let f = 0; f < frames; f += every) {
+    // (a frame already there is kept: a render broken off goes on where it stopped)
+    if (fs.existsSync(`${dir}/f_${String(f).padStart(4, '0')}.jpg`)) continue;
     const T = s.start + f / FPS;
     const cam = cameraAt(s, f / (frames - 1));
     const b64 = await page.evaluate(async ({ cam, fov, shadow, focus, T, hour, length, samples }) => {
