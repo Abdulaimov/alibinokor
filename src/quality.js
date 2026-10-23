@@ -29,7 +29,6 @@ export const Q = {
   pixelRatio: Math.min(devicePixelRatio || 1, high ? 2 : 1.5),
   shadowMap: high ? 8192 : 2048,
   ao: high,
-  skyRes: high ? '2k' : '1k',
   antialias: true,
 };
 

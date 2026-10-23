@@ -13,6 +13,7 @@ import { DAY, FIRST, LAST, clock as hhmm, timeOfDay } from './night.js';
 import { ROOM_LIGHT } from './interior/materials.js';
 import { captureReflections } from './reflections.js';
 import { addGrass } from './grass.js';
+import { addFlowers, flowerBeds } from './flowers.js';
 import { GROUND_AO } from './materials.js';
 import { WalkControls } from './walk.js';
 import { drawPlan, planTransform } from './plan.js';
@@ -176,12 +177,19 @@ Promise.all([modelLoad, world.ready])
     });
     daytime.indoors(!!outdoor);
     $('#daytime').hidden = false;
-    if (Q.level === 'high') highQuality();
+    // the flower beds on the lawns (both levels: a few thousand small cards)
+    loadSiteMap()
+      .then((map) => {
+        flowers = addFlowers(scene, map, toScene);
+        shadowsDirty();
+      })
+      .catch((e) => console.warn('flowers', e))
+      .finally(() => Q.level === 'high' && highQuality());
   })
   .catch((e) => console.warn('time of day', e));
 dtRange.addEventListener('input', () => setHours(+dtRange.value));
 
-let grass = null;
+let grass = null, flowers = null;
 // High quality (computers): the ground's baked sky occlusion and glass that reflects its surroundings
 // (taken once, in daylight, when everything is in; the floor or flat open meanwhile is put back)
 async function highQuality() {
@@ -202,7 +210,8 @@ async function highQuality() {
   }
   // grass with blades on the lawns round the camera, the trees and the grass in a light breeze
   try {
-    grass = addGrass(scene, await loadSiteMap(), WIND);
+    const map = await loadSiteMap();
+    grass = addGrass(scene, map, WIND, flowerBeds(map));
     WIND.amp.value = 0.07;
   } catch (e) {
     console.warn('grass', e);
@@ -830,7 +839,7 @@ async function enterSiteWalk(from = null) {
     labelsEl.innerHTML = '';
     labels = [];
     liftLabels = [];
-    walkInterior = siteWalk(map, from, blockPicks);
+    walkInterior = siteWalk(map, from, blockPicks, flowerBeds(map));
     placesEl.style.display = 'none';
     tooltip.style.opacity = 0;
     Object.assign(state, { mode: 'walk', apt: null, hoverApt: null, hoverFloor: null });
@@ -1297,6 +1306,7 @@ window.__app = {
   get interior() { return walkInterior; },
   selectBlock, selectFloor, selectApt, enterWalk, exitWalk, goOverview, enterSiteWalk,
   get daytime() { return daytime; },
+  get flowers() { return flowers; },
   film: { WIND, driveCars, setDrivers, updateCars, shadowsDirty: () => shadowsDirty() },
   setHours: (h) => setHours(h),
   setClean: (on) => setClean(on),

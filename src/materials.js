@@ -358,7 +358,7 @@ const LIB = {
   // glazing light grey, the dark strips dark green, the corner bays blue
   'Stone pale': { set: 'plaster', mapless: true, tile: 2.2, color: '#b8bbbe', roughness: 0.7, normal: 0.25, env: 0.6 },
   // the cornice bands: bronze-gold as on the renders (the earlier #e8c08a was the yellowest thing on the facade)
-  'Stone gold': { set: 'plaster', mapless: true, tile: 2.2, color: '#c69c68', roughness: 0.62, normal: 0.35, vary: 0.03, env: 0.6 },
+  'Stone gold': { set: 'plaster', mapless: true, tile: 2.2, color: '#d0a062', roughness: 0.62, normal: 0.35, vary: 0.03, env: 0.6 },
   'Glass light': { ...glass('#000000', 0.03, { env: 1.4, tint: '#e6edf0', interior: [1.6, 3.5, 3.5, 12.0, 0.5, 0.75, 0.008, 0.45, 1.15] }), physical: { ior: 1.9 } },
   'Glass dark': { ...glass('#000000', 0.03, { env: 1.0, tint: '#b3a69c', interior: [1.2, 3.5, 2.5, 12.0, 0.2, 0.3, 0.006, 0.32, 0.75] }), physical: { ior: 2.0 } },
   'Bay glass': { ...glass('#000000', 0.03, { env: 1.15, tint: '#8db0c6', interior: [2.0, 3.5, 3.5, 12.0, 0.36, 0.55, 0.008, 0.3, 1.0], specular: '#d2e2ea' }), physical: { ior: 2.1 } },
@@ -367,7 +367,7 @@ const LIB = {
   'Brick tan': { brick: 'tan', tile: 2.0, color: '#ffffff', roughness: 1, normal: 0.8, vary: 0.04, env: 0.45 },
   'Brick dark': { brick: 'dark', tile: 2.0, color: '#ffffff', roughness: 1, normal: 0.8, vary: 0.03, env: 0.5 },
   'Stone white': { set: 'plaster', mapless: true, tile: 2.2, color: '#efede7', roughness: 0.75, normal: 0.22, vary: 0.015, env: 0.8 },
-  'Stone dark': { set: 'concrete', tile: 2.5, color: '#55565a', roughness: 0.72, normal: 0.35, vary: 0.02, env: 0.6 },
+  'Stone dark': { set: 'concrete', tile: 2.5, color: '#51545d', roughness: 0.72, normal: 0.35, vary: 0.02, env: 0.6 },
   'Frame dark': { color: '#2c3034', roughness: 0.38, metalness: 0.55, env: 0.9 },
   'Frame crown': { color: '#80868b', roughness: 0.45, metalness: 0.5, env: 0.8 },
   'Stone beige': { set: 'plaster', tile: 2.2, color: '#e3c597', roughness: 0.75, normal: 0.3, vary: 0.02, env: 0.6 },
@@ -388,7 +388,7 @@ const LIB = {
   Shelf: { color: '#ece7de', roughness: 0.6 },
   Counter: { color: '#7c5b42', roughness: 0.5 },
   // the ground beyond the plot: a mown green with a little variation (no large mottling)
-  Ground: { set: 'grass', tile: 3.2, color: '#86a05a', roughness: 1, normal: 0.6, vary: 0.07, detile: true, tint: '#a9b07a' },
+  Ground: { set: 'grass', tile: 3.2, color: '#6e9650', roughness: 1, normal: 0.6, vary: 0.07, detile: true, tint: '#9cb372' },
   'Rubber orange': { set: 'rubber', tile: 2, color: '#e08a45', roughness: 1, normal: 0.6 },
   'Rubber yellow': { set: 'rubber', tile: 2, color: '#e6c452', roughness: 1, normal: 0.6 },
   'Sport green': { set: 'grass', tile: 1.0, color: '#4f9a3c', roughness: 0.95, normal: 0.5, vary: 0.04 },
@@ -410,14 +410,14 @@ const LIB = {
   // ground
   // asphalt: the photographed set at 6 m a tile (its stains then read as wear, not as blotches),
   // detiled and a little lighter; concrete paving slabs for the sidewalks
-  Asphalt: { set: 'asphalt', tile: 6, color: '#cfcfcf', roughness: 1, normal: 0.6, vary: 0.05, detile: true },
+  Asphalt: { set: 'asphalt', tile: 6, color: '#dedbd3', roughness: 1, normal: 0.6, vary: 0.05, detile: true },
   'Road line': { color: '#e4e2db', roughness: 0.7 },
   Sidewalk: { color: '#ffffff', roughness: 0.95, vary: 0.05, env: 0.6 },
   // the plaza and the sidewalks: drawn pavers (textures.js), the photographed sets are dark and stained
   Paving: { color: '#ffffff', roughness: 0.95, vary: 0.05, env: 0.6 },
   Kerb: { set: 'concrete', tile: 2, color: '#d9d4ca', roughness: 0.95, normal: 0.6 },
-  Lawn: { set: 'grass', tile: 2.4, color: '#7fa556', roughness: 1, normal: 0.9, vary: 0.07, detile: true, tint: '#b6bb78' },
-  Grass: { set: 'grass', tile: 2.4, color: '#7f9a52', roughness: 1, normal: 0.9, vary: 0.08, detile: true, tint: '#b6bb78' },
+  Lawn: { set: 'grass', tile: 2.4, color: '#6c9a52', roughness: 1, normal: 0.9, vary: 0.06, detile: true, tint: '#9ebb74' },
+  Grass: { set: 'grass', tile: 2.4, color: '#73955a', roughness: 1, normal: 0.9, vary: 0.08, detile: true, tint: '#a8b97c' },
   Mulch: { set: 'grass', mapless: true, tile: 1.2, color: '#4b3527', roughness: 1, normal: 1.2, vary: 0.05 },
   Embankment: { set: 'concrete', tile: 4, color: '#c4b8a6', roughness: 1, normal: 0.7, vary: 0.08 },
   Bridge: { set: 'concrete', tile: 4, color: '#bdb9b1', roughness: 0.95, normal: 0.6, vary: 0.05 },

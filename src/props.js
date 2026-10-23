@@ -64,7 +64,10 @@ function impostorGeometry(v) {
 // a breeze in the trees (the TV film sets it; the site keeps them still): amplitude and time
 export const WIND = { amp: { value: 0 }, t: { value: 0 } };
 
-function treeMaterial(atlas, size) {
+// bloom: '' (green), 'pink' or 'white': flowering trees (crape myrtle, sakura, white lilac): the
+// leaves of the photographed crown recoloured in patches, the trunk and the shade left as they are
+const BLOOM = { pink: '0.95, 0.5, 0.68', white: '0.97, 0.95, 0.9' };
+function treeMaterial(atlas, size, bloom = '') {
   const loader = new THREE.TextureLoader();
   const color = loader.load(`${TREE_URL}${atlas}color_${size}.webp`);
   color.colorSpace = THREE.SRGBColorSpace;
@@ -108,18 +111,41 @@ function treeMaterial(atlas, size) {
         diffuseColor.a *= smoothstep(0.12, 0.4, facing);
       }
       #include <alphatest_fragment>`);
+    // the photographed crowns are a muted olive; the trees of the renders a fresh, sunny green: the
+    // leaves (where green is not below red; the trunks are brown) are graded towards it (23.10.2026)
+    sh.fragmentShader = sh.fragmentShader.replace('#include <map_fragment>', `#include <map_fragment>
+      {
+        vec3 c = diffuseColor.rgb;
+        float leaf = smoothstep(-0.004, 0.006, c.g - c.r);
+        vec3 outc = mix(c, c * vec3(0.9, 1.4, 0.55) * 1.3, leaf);
+        ${bloom ? `
+        vec2 q = vMapUv * 230.0;
+        vec2 i = floor(q), f = fract(q);
+        f = f * f * (3.0 - 2.0 * f);
+        float h00 = fract(sin(dot(i, vec2(12.9898, 78.233))) * 43758.5453);
+        float h10 = fract(sin(dot(i + vec2(1, 0), vec2(12.9898, 78.233))) * 43758.5453);
+        float h01 = fract(sin(dot(i + vec2(0, 1), vec2(12.9898, 78.233))) * 43758.5453);
+        float h11 = fract(sin(dot(i + vec2(1, 1), vec2(12.9898, 78.233))) * 43758.5453);
+        float n = mix(mix(h00, h10, f.x), mix(h01, h11, f.x), f.y);
+        float lum = dot(c, vec3(0.299, 0.587, 0.114));
+        vec3 flower = vec3(${BLOOM[bloom]}) * (0.3 + 7.0 * lum);
+        outc = mix(outc, flower, leaf * smoothstep(0.32, 0.6, n) * 0.95);` : ''}
+        diffuseColor.rgb = outc;
+      }`);
   };
-  mat.customProgramCacheKey = () => `tree${px}`;
+  mat.customProgramCacheKey = () => `tree${px}${bloom}`;
   return mat;
 }
 
 export function addTrees(scene, protos, list, placed, toScene) {
   const size = Q.level === 'high' ? '2k' : '1k';
   const mats = {};
-  const matFor = (atlas) => (mats[atlas] ??= treeMaterial(atlas, size));
+  const matFor = (atlas, bloom) => (mats[atlas + bloom] ??= treeMaterial(atlas, size, bloom));
   // kinds of tree -> rendered variants (alternating where there are two)
   // (full: the full-crowned broadleaf added on 21.10.2026, atlas c)
-  const kinds = { broad: ['broad_b', 'full', 'broad', 'broad_b', 'full'], conifer: ['fir_a', 'fir_b'], poplar: ['poplar'], small: ['shrub'], shrub: ['shrub'] };
+  const kinds = { broad: ['broad_b', 'full', 'broad', 'broad_b', 'full'], conifer: ['fir_a', 'fir_b'], poplar: ['poplar'], small: ['shrub'], shrub: ['shrub'],
+    blossom: ['full', 'broad_b', 'shrub'], white: ['shrub', 'full'] };
+  const bloomOf = { blossom: 'pink', white: 'white' };
   // site plan proto (height, radius, light crown) -> kind
   const pick = (p, i) => {
     if (p.light && p.h <= 6) return 'small';
@@ -129,20 +155,28 @@ export function addTrees(scene, protos, list, placed, toScene) {
   };
   const items = [
     ...list.map(([x, y, sc, sz, rot, k], i) => ({ x, y, z: 0, h: protos[k].h * sc * sz, r: protos[k].r * sc, rot, kind: pick(protos[k], i) })),
-    ...placed.map(([x, y, z, h, r, kind], i) => ({ x, y, z, h, r, rot: i * 2.39996, kind })),
+    ...placed.map(([x, y, z, h, r, kind, city], i) => ({ x, y, z, h, r, rot: i * 2.39996, kind, city: !!city })),
   ];
+  // the courtyards and the walks in flower (23.10.2026: "beautiful, saturated trees"): now and then a
+  // small or middling broadleaf of the plan a pink-flowering one, more rarely a white one
+  items.forEach((t, i) => {
+    if (t.city || t.z > 1 || (t.kind !== 'broad' && t.kind !== 'small') || t.h > 11) return;
+    if (i % 5 === 2) t.kind = 'blossom';
+    else if (i % 11 === 7) t.kind = 'white';
+  });
   const groups = {};
   items.forEach((t, i) => {
     const vs = kinds[t.kind] ?? kinds.broad;
-    (groups[vs[i % vs.length]] ??= []).push(t);
+    (groups[`${vs[i % vs.length]}|${bloomOf[t.kind] ?? ''}`] ??= []).push(t);
   });
   const m4 = new THREE.Matrix4(), q = new THREE.Quaternion(), p = new THREE.Vector3(), s = new THREE.Vector3(), e = new THREE.Euler();
   const tint = new THREE.Color(), white = new THREE.Color(1, 1, 1);
   const rnd = rng(23);
-  for (const [variant, group] of Object.entries(groups)) {
+  for (const [key, group] of Object.entries(groups)) {
+    const [variant, bloom] = key.split('|');
     const v = TREES_INFO[variant] ?? TREES_INFO.broad;
     if (!v) continue;
-    const mesh = new THREE.InstancedMesh(impostorGeometry(v), matFor(v.atlas ?? ''), group.length);
+    const mesh = new THREE.InstancedMesh(impostorGeometry(v), matFor(v.atlas ?? '', bloom), group.length);
     group.forEach((t, i) => {
       const w = toScene(t.x, t.y);
       // the plan's height and crown radius, within the photographed tree's proportions
@@ -154,12 +188,13 @@ export function addTrees(scene, protos, list, placed, toScene) {
       // a little more or less green and light from tree to tree; a touch brighter than the
       // renders under an even sky, the fresh green of the client's renders in the sun
       tint.setHSL(0.27 + (rnd() - 0.5) * 0.05, 0.3 + rnd() * 0.15, 0.5 + (rnd() - 0.5) * 0.12).lerp(white, 0.7).multiplyScalar(1.1 + rnd() * 0.12);
+      if (bloom) tint.setRGB(1, 1, 1).multiplyScalar(1.02 + rnd() * 0.12);
       mesh.setColorAt(i, tint);
     });
     mesh.castShadow = true;
     mesh.receiveShadow = true;
     mesh.frustumCulled = false; // instances spread over the whole site
-    mesh.name = `trees ${variant}`;
+    mesh.name = bloom ? `trees ${variant} ${bloom}` : `trees ${variant}`;
     scene.add(mesh);
   }
 }

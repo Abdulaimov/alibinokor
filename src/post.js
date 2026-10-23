@@ -33,8 +33,8 @@ export function postPipeline(renderer, scene, camera, tone) {
   // the grade of the client's renders: a little more contrast and colour, the corners a shade darker
   composer.addPass(new EffectPass(camera,
     new ToneMappingEffect({ mode: MODES[tone] }),
-    new BrightnessContrastEffect({ brightness: 0.0, contrast: 0.04 }),
-    new HueSaturationEffect({ saturation: 0.08 }),
+    new BrightnessContrastEffect({ brightness: 0.0, contrast: 0.06 }),
+    new HueSaturationEffect({ saturation: 0.14 }),
     new VignetteEffect({ offset: 0.38, darkness: 0.32 })));
   composer.setSize(innerWidth, innerHeight);
   return {

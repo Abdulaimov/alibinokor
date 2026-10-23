@@ -14,14 +14,13 @@ import skyInfo from '../public/env/sky.json';
 
 const ENV = `${import.meta.env.BASE_URL}env/`;
 // daylight like the marketing renders: a clear afternoon sun, nearly white (a yellow sun and a
-// warmed sky light made the brick and the white stone read yellow, 22.10.2026), the sky's light a
-// little blue in the shadows; the sky seen behind the blocks lighter than the light it gives, airy
-// and pale as on the renders, its clouds white; ?sun= ?sky= ?bg= ?suncolor= to compare
+// warmed sky light made the brick and the white stone read yellow, 22.10.2026); a bright, clear sky
+// whose light fills the shade (the walls in the shade read in their colours, not grey: 23.10.2026,
+// "the houses look dull"); ?sun= ?sky= ?suncolor= ?skysat= ?clouds= to compare
 const LIGHT = new URLSearchParams(location.search);
-const SKY_INTENSITY = +(LIGHT.get('sky') ?? 1.35);
-const BG_INTENSITY = +(LIGHT.get('bg') ?? 1.7);
-const SUN_INTENSITY = +(LIGHT.get('sun') ?? 3.0);
-const SUN_COLOR = LIGHT.get('suncolor') ? `#${LIGHT.get('suncolor')}` : '#fff7ee';
+const SKY_INTENSITY = +(LIGHT.get('sky') ?? 1.85);
+const SUN_INTENSITY = +(LIGHT.get('sun') ?? 3.3);
+const SUN_COLOR = LIGHT.get('suncolor') ? `#${LIGHT.get('suncolor')}` : '#fff6ea';
 const HAZE = new THREE.Color(0xcad6e0);
 
 function rng(seed) {
@@ -123,6 +122,114 @@ function city(scene) {
   return { mat, trees, lights };
 }
 
+// ---------- the sky ----------
+// A clear deep blue, paler towards the horizon, with scattered fair-weather cumulus (as on the
+// competitor's site the client liked, 23.10.2026). Drawn per pixel on a sphere round the camera, so
+// the clouds stay crisp at any zoom: the view ray meets a cloud layer; the clouds are where a few
+// octaves of noise on that layer pass a threshold, lit on the sun's side, blue-grey underneath.
+// Below the horizon the ground's dark green-grey (only reflections see it). Colours sRGB, by elevation.
+const SKY_STOPS = [[-90, [38, 46, 34]], [-1, [70, 80, 64]], [0, [186, 214, 244]], [2, [158, 200, 243]], [5, [110, 172, 235]],
+  [10, [62, 142, 228]], [15, [32, 122, 216]], [30, [16, 102, 206]], [90, [10, 86, 194]]];
+const lin = (c) => ((c / 255 + 0.055) / 1.055) ** 2.4;
+// light: the sky's brightness, 0..1 (src/night.js dims it at dusk; the night's dome covers it)
+function makeSky(sunDir, light = { value: 1 }) {
+  const el = SKY_STOPS.map((s) => s[0]);
+  const col = SKY_STOPS.map((s) => new THREE.Vector3(...s[1].map(lin)));
+  const mat = new THREE.ShaderMaterial({
+    name: 'Sky',
+    side: THREE.BackSide,
+    depthWrite: false,
+    depthTest: false,
+    fog: false,
+    uniforms: {
+      uEl: { value: el },
+      uCol: { value: col },
+      uSun: { value: sunDir.clone().normalize() },
+      uCover: { value: +(LIGHT.get('clouds') ?? 0.68) },
+      uLight: light,
+    },
+    vertexShader: /* glsl */ `
+      varying vec3 vDir;
+      void main() {
+        vDir = (modelMatrix * vec4(position, 0.0)).xyz;
+        vec4 p = projectionMatrix * modelViewMatrix * vec4(position, 1.0);
+        gl_Position = p.xyww;
+      }`,
+    fragmentShader: /* glsl */ `
+      uniform float uEl[${el.length}];
+      uniform vec3 uCol[${el.length}];
+      uniform vec3 uSun;
+      uniform float uCover;
+      uniform float uLight;
+      varying vec3 vDir;
+      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
+      float noise(vec2 p) {
+        vec2 i = floor(p), f = fract(p);
+        vec2 u = f * f * (3.0 - 2.0 * f);
+        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
+      }
+      float fbm(vec2 p) {
+        float v = 0.0, a = 0.5;
+        mat2 r = mat2(0.8, -0.6, 0.6, 0.8);
+        for (int i = 0; i < 6; i++) { v += a * noise(p); p = r * p * 2.07 + 13.7; a *= 0.5; }
+        return v;
+      }
+      float cumulus(vec2 q) {
+        float c = fbm(q * 0.45);
+        float b = 0.0, a = 0.5;
+        vec2 r = q * 1.6;
+        mat2 m = mat2(0.8, -0.6, 0.6, 0.8);
+        for (int i = 0; i < 5; i++) { b += a * (1.0 - abs(2.0 * noise(r) - 1.0)); r = m * r * 2.13 + 7.3; a *= 0.5; }
+        return c * 0.7 + b * 0.38;
+      }
+      vec3 gradient(float e) {
+        vec3 c = uCol[0];
+        for (int i = 1; i < ${el.length}; i++) {
+          float k = clamp((e - uEl[i - 1]) / (uEl[i] - uEl[i - 1]), 0.0, 1.0);
+          c = e > uEl[i - 1] ? mix(uCol[i - 1], uCol[i], k) : c;
+        }
+        return c;
+      }
+      void main() {
+        vec3 d = normalize(vDir);
+        float e = degrees(asin(clamp(d.y, -1.0, 1.0)));
+        vec3 col = gradient(e);
+        // a soft glow round the sun (the disc itself is the directional light's, not drawn)
+        float s = max(dot(d, normalize(uSun)), 0.0);
+        col += vec3(1.0, 0.96, 0.88) * (0.25 * pow(s, 24.0) + 0.06 * pow(s, 4.0)) * step(0.0, d.y);
+        if (d.y > 0.004) {
+          // fair-weather cumulus: clusters from a low-frequency field, puffy cells from ridged noise,
+          // the side towards the sun bright, the bottoms and the far side a soft blue-grey
+          vec2 p = d.xz / (d.y + 0.1) * 1.4;
+          vec2 q = p * 1.05 + vec2(3.7, 1.9);
+          float d0 = cumulus(q);
+          float dens = smoothstep(uCover, uCover + 0.07, d0);
+          vec2 toSun = normalize(uSun.xz + 1e-4) * 0.09;
+          float dl = cumulus(q + toSun);
+          float lit = clamp(0.62 + (d0 - dl) * 5.0, 0.0, 1.0);
+          float core = smoothstep(uCover + 0.04, uCover + 0.32, d0);
+          vec3 cloud = mix(vec3(0.58, 0.64, 0.74), vec3(1.0), lit);
+          cloud = mix(cloud, cloud * vec3(0.9, 0.92, 0.96), core * (1.0 - lit) * 0.6);
+          float fade = smoothstep(0.04, 0.2, d.y);
+          col = mix(col, cloud, dens * fade);
+        }
+        gl_FragColor = vec4(col * uLight, 1.0);
+        #include <tonemapping_fragment>
+        #include <colorspace_fragment>
+      }`,
+  });
+  const mesh = new THREE.Mesh(new THREE.SphereGeometry(1000, 48, 24), mat);
+  mesh.name = 'sky';
+  mesh.frustumCulled = false;
+  mesh.renderOrder = -1000;
+  // round the camera, whichever is drawing (the cube cameras of the glass's reflections too)
+  mesh.onBeforeRender = (r, sc, cam) => {
+    mesh.position.setFromMatrixPosition(cam.matrixWorld);
+    mesh.updateMatrixWorld();
+  };
+  return mesh;
+}
+
 /**
  * @param after  resolves when the model is in: sky, trees and cars wait for it
  */
@@ -135,10 +242,13 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
   scene.backgroundRotation.set(0, SKY_TURN, 0);
   scene.environmentRotation.set(0, SKY_TURN, 0);
 
-  // aerial perspective: the city a kilometre out a little hazy, the complex (100-400 m) clear
-  scene.fog = new THREE.FogExp2(HAZE.getHex(), +(LIGHT.get('fog') ?? 0.0003));
-  scene.background = new THREE.Color(0xb9cde0);
-  scene.backgroundIntensity = BG_INTENSITY;
+  // aerial perspective: the city a kilometre out a little hazy, the complex (100-400 m) clear; the
+  // haze the sky's colour at the horizon, so the plain runs into the sky
+  scene.fog = new THREE.FogExp2(HAZE.getHex(), +(LIGHT.get('fog') ?? 0.0007));
+  scene.fog.color.setRGB(...SKY_STOPS[2][1].map(lin)).multiplyScalar(0.97);
+  const skyLight = { value: 1 };
+  scene.add(makeSky(sunDir, skyLight));
+  scene.background = null;
   scene.environmentIntensity = SKY_INTENSITY;
 
   const sun = new THREE.DirectionalLight(new THREE.Color(SUN_COLOR), SUN_INTENSITY);
@@ -173,52 +283,56 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
   const hdr = new RGBELoader().setDataType(THREE.FloatType);
   const sky = (res) => hdr.loadAsync(`${ENV}sky_${res}.hdr`).then((t) => ((t.mapping = THREE.EquirectangularReflectionMapping), t));
   // the light of the sky on the buildings: part of the HDRI's blue taken out (the renders' white
-  // stone is white, not blue-grey), no warmth added (it turned the facades yellow); the background
-  // keeps the real sky
+  // stone is white, not blue-grey), no warmth added (it turned the facades yellow); below the horizon
+  // the HDRI mirrors its sky: the light from below is the ground's instead (lawns and paving in the
+  // sun, a green-beige, darker straight down), so the undersides are not lit blue
   const neutral = (t) => {
     const src = t.image.data, n = src.length / 4;
     const out = new Float32Array(src.length);
-    const K = +(LIGHT.get('skysat') ?? 0.55);
+    const K = +(LIGHT.get('skysat') ?? 0.62);
+    const W_ = t.image.width, H_ = t.image.height;
+    const GROUND = [0.27, 0.27, 0.2];
     for (let i = 0; i < n; i++) {
       const r = src[i * 4], g = src[i * 4 + 1], b = src[i * 4 + 2];
       const l = 0.2126 * r + 0.7152 * g + 0.0722 * b;
-      out[i * 4] = l + (r - l) * K;
-      out[i * 4 + 1] = l + (g - l) * K;
-      out[i * 4 + 2] = l + (b - l) * K;
+      let o = [l + (r - l) * K, l + (g - l) * K, l + (b - l) * K];
+      const el = 90 - ((Math.floor(i / W_) + 0.5) / H_) * 180;
+      if (el < 1) {
+        const k = THREE.MathUtils.clamp((1 - el) / 4, 0, 1);
+        const dark = 1 - 0.35 * THREE.MathUtils.clamp(-el / 90, 0, 1);
+        o = o.map((v, j) => v + (GROUND[j] * dark - v) * k);
+      }
+      out[i * 4] = o[0];
+      out[i * 4 + 1] = o[1];
+      out[i * 4 + 2] = o[2];
       out[i * 4 + 3] = 1;
     }
     const e = new THREE.DataTexture(out, t.image.width, t.image.height, THREE.RGBAFormat, THREE.FloatType);
     e.mapping = THREE.EquirectangularReflectionMapping;
     e.colorSpace = t.colorSpace;
+    e.flipY = t.flipY; // the HDR's rows run top-down (RGBELoader flips it on upload)
     e.needsUpdate = true;
     return e;
-  };
-  const horizon = (t) => {
-    const { data, width: w, height: h } = t.image;
-    const rows = [Math.round(h * 0.5) - 3, Math.round(h * 0.5) - 1];   // just above the horizon
-    const c = [0, 0, 0];
-    let n = 0;
-    for (const y of rows) {
-      for (let x = 0; x < w; x += 4) {
-        const i = (y * w + x) * 4;
-        c[0] += data[i]; c[1] += data[i + 1]; c[2] += data[i + 2];
-        n++;
-      }
-    }
-    const k = BG_INTENSITY / n; // the haze as bright as the sky seen at the horizon
-    scene.fog.color.setRGB(c[0] * k, c[1] * k, c[2] * k);
   };
   const ready = after
     .then(() => sky('1k'))
     .then((t) => {
-      scene.background = t;
-      horizon(t);
       const e = neutral(t);
       scene.environment = pmrem.fromEquirectangular(e).texture;
       e.dispose();
-      // the glass reflects the real sky (blue at the top of the facades, as on the renders); the
-      // walls and the ground are lit by the neutral version
-      const skyEnv = pmrem.fromEquirectangular(t).texture;
+      t.dispose();
+      // the glass reflects the sky as drawn (the blue, the white clouds; on computers the whole scene
+      // round it, src/reflections.js); the walls and the ground are lit by the neutral HDRI
+      const skyScene = new THREE.Scene();
+      skyScene.add(makeSky(sunDir));
+      const cubeRT = new THREE.WebGLCubeRenderTarget(256, { type: THREE.HalfFloatType });
+      const cubeCam = new THREE.CubeCamera(0.1, 2000, cubeRT);
+      const tm = renderer.toneMapping;
+      renderer.toneMapping = THREE.NoToneMapping;
+      cubeCam.update(renderer, skyScene);
+      renderer.toneMapping = tm;
+      const skyEnv = pmrem.fromCubemap(cubeRT.texture).texture;
+      cubeRT.dispose();
       scene.traverse((o) => {
         for (const m of [o.material].flat()) {
           if (m?.userData?.glass && !m.envMap) {
@@ -242,22 +356,12 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
     });
   } else addPeople(scene, PEOPLE, toScene);
   const props = after.then(() => {
-    // the complex's trees, then the city's (site metres for both: scene z = -north)
-    const around = cityTrees.map((t, i) => [t.x, -t.z, 0, t.h, t.h * 0.38, i % 7 === 0 ? 'conifer' : i % 5 === 0 ? 'poplar' : 'broad']);
+    // the complex's trees, then the city's (site metres for both: scene z = -north); in the city now
+    // and then a tree in flower
+    const kindOf = (i) => (i % 7 === 0 ? 'conifer' : i % 5 === 0 ? 'poplar' : i % 19 === 3 ? 'blossom' : i % 29 === 4 ? 'white' : 'broad');
+    const around = cityTrees.map((t, i) => [t.x, -t.z, 0, t.h, t.h * 0.38, kindOf(i), 'city']);
     addTrees(scene, TREES.protos, TREES.list, [...TREES.placed, ...around], toScene);
     addCars(scene, CARS, toScene);
   });
-  if (Q.skyRes !== '1k') {
-    Promise.all([ready, props])
-      .then(() => new Promise((r) => setTimeout(r, 1500)))
-      .then(() => sky(Q.skyRes))
-      .then((t) => {
-        const old = scene.background;
-        scene.background = t;
-        old?.dispose?.();
-      })
-      .catch((e) => console.warn('sky background', e));
-  }
-
-  return { sun, fill, cityMat, cityLights, ready: Promise.all([ready, props]) };
+  return { sun, fill, cityMat, cityLights, skyLight, ready: Promise.all([ready, props]) };
 }

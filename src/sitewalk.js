@@ -31,6 +31,33 @@ export function loadSiteMap() {
   return cached;
 }
 
+// run lengths along the rows, alternately out and in, LEB128 (the build's walk map) -> a bit per cell
+function decodeRuns(runs, n) {
+  const bits = new Uint8Array(n), b = Uint8Array.from(atob(runs), (ch) => ch.charCodeAt(0));
+  for (let p = 0, k = 0, inside = false; p < b.length; inside = !inside) {
+    let v = 0;
+    for (let sh = 0; ; sh += 7) {
+      const c = b[p++];
+      v += (c & 127) * 2 ** sh;
+      if (c < 128) break;
+    }
+    if (inside) bits.fill(1, k, k + v);
+    k += v;
+  }
+  return bits;
+}
+
+/** the lawns' fine mask (25 cm): (x, y) in site metres -> on the lawn itself, not on its kerb or the paving */
+export function lawnTest(map) {
+  const L = map.lawn;
+  if (!L) return () => true;
+  const bits = decodeRuns(L.runs, L.gx * L.gy);
+  return (x, y) => {
+    const i = Math.floor((x - map.x0) / L.step), j = Math.floor((y - map.y0) / L.step);
+    return i >= 0 && j >= 0 && i < L.gx && j < L.gy && bits[j * L.gx + i] === 1;
+  };
+}
+
 function inPoly(p, x, y) {
   let c = false;
   for (let i = 0, j = p.length - 1; i < p.length; j = i++) {
@@ -47,7 +74,7 @@ function inPoly(p, x, y) {
  * @param from   where to begin: null for the courtyard entrance, or a block key ('B', 'G'...)
  * @param picks  meshes that hide the ground behind them (the blocks' invisible prisms)
  */
-export function siteWalk(map, from = null, picks = []) {
+export function siteWalk(map, from = null, picks = [], beds = []) {
   const ground = Uint8Array.from(atob(map.ground), (ch) => ch.charCodeAt(0));
   const { x0, y0, nx, ny } = map;
   const kindAt = (x, y) => {
@@ -82,7 +109,8 @@ export function siteWalk(map, from = null, picks = []) {
     addTo(bx0, by0, bx1, by1, s, 'solids');
   }
   for (const [w, pts] of map.lines) for (let i = 1; i < pts.length; i++) addSeg(pts[i - 1], pts[i], w / 2);
-  for (const p of map.posts) addTo(p[0] - p[2], p[1] - p[2], p[0] + p[2], p[1] + p[2], p, 'posts');
+  // (the flower beds, src/flowers.js, are posts too: round, the walker keeps off them)
+  for (const p of [...map.posts, ...beds.map((d) => [d.x, d.y, d.r + 0.15])]) addTo(p[0] - p[2], p[1] - p[2], p[0] + p[2], p[1] + p[2], p, 'posts');
   const near = (x, y) => cells.get(key(Math.floor(x / CELL), Math.floor(y / CELL)));
   const insideSolid = (x, y) => near(x, y)?.solids.some((s) => inPoly(s, x, y)) ?? false;
   const free = (x, y) => kindAt(x, y) !== 0 && !insideSolid(x, y);
@@ -109,18 +137,15 @@ export function siteWalk(map, from = null, picks = []) {
   // the places the walker can get to (the build's map.reach: run lengths along the rows,
   // alternately out of reach and in it, LEB128), then cut short wherever the walker can see further
   const { step: G, gx: GX, gy: GY } = map.reach;
-  const open = new Uint8Array(GX * GY);
-  {
-    const b = Uint8Array.from(atob(map.reach.runs), (ch) => ch.charCodeAt(0));
-    for (let p = 0, k = 0, inside = false; p < b.length; inside = !inside) {
-      let v = 0;
-      for (let sh = 0; ; sh += 7) {
-        const c = b[p++];
-        v += (c & 127) * 2 ** sh;
-        if (c < 128) break;
+  const open = decodeRuns(map.reach.runs, GX * GY);
+  // the flower beds closed to the search (the walk goes round them)
+  for (const d of beds) {
+    const rr = d.r + 0.15 + R;
+    for (let j = Math.floor((d.y - rr - y0) / G); j <= Math.floor((d.y + rr - y0) / G); j++) {
+      for (let i = Math.floor((d.x - rr - x0) / G); i <= Math.floor((d.x + rr - x0) / G); i++) {
+        if (i < 0 || j < 0 || i >= GX || j >= GY) continue;
+        if (Math.hypot(x0 + (i + 0.5) * G - d.x, y0 + (j + 0.5) * G - d.y) < rr) open[j * GX + i] = 0;
       }
-      if (inside) open.fill(1, k, k + v);
-      k += v;
     }
   }
   // the search's arrays, kept between clicks: a cell's cost counts only when stamped this search

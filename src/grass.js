@@ -5,15 +5,18 @@
 // the camera moves on), thinning out with distance. A breeze sways the tips.
 import * as THREE from 'three';
 import { lampChunk } from './materials.js';
+import { lawnTest } from './sitewalk.js';
+import { bedTest } from './flowers.js';
 
 const R = 30; // metres round the camera
-const PER_CELL = 12; // tufts in a square metre of lawn, near the camera
+const PER_CELL = 16; // tufts in a square metre of lawn, near the camera
 const LAWN = { 3: 0.15, 6: 0.05 }; // ground kinds with grass -> their level (sitewalk.js KINDS)
 
 function tuft() {
-  // a tuft: 11 tapered, bent blades round a point, 7-13 cm tall (a kept lawn); colour from the root (dark) to the tip
+  // a tuft: 11 tapered, bent blades round a point, 7-13 cm tall (a kept lawn); colour from the root (dark)
+  // to the tip, the lawn's own green (23.10.2026: lighter tips stood out as pale spikes)
   const pos = [], col = [], rnd = (() => { let s = 7; return () => ((s = (s * 16807) % 2147483647) / 2147483647); })();
-  const root = new THREE.Color(0.075, 0.13, 0.035), tip = new THREE.Color(0.36, 0.5, 0.15), dry = new THREE.Color(0.48, 0.5, 0.24);
+  const root = new THREE.Color(0.05, 0.1, 0.025), tip = new THREE.Color(0.17, 0.33, 0.07), dry = new THREE.Color(0.32, 0.36, 0.14);
   for (let b = 0; b < 11; b++) {
     const a = rnd() * Math.PI * 2, r = rnd() * 0.08, h = 0.07 + rnd() * 0.06, w = 0.008 + rnd() * 0.006;
     const lean = 0.25 + rnd() * 0.45, la = rnd() * Math.PI * 2;
@@ -51,29 +54,13 @@ const hash = (i, j, k) => {
   return ((h ^ (h >>> 16)) >>> 0) / 4294967296;
 };
 
-export function addGrass(scene, map, wind) {
+export function addGrass(scene, map, wind, beds = []) {
   const ground = Uint8Array.from(atob(map.ground), (ch) => ch.charCodeAt(0));
   const { x0, y0, nx, ny } = map;
-  // the lawns' fine mask (25 cm, the build's walk map: run lengths along the rows, out and in, LEB128)
-  const L = map.lawn;
-  let onLawn = () => true;
-  if (L) {
-    const bits = new Uint8Array(L.gx * L.gy), b = Uint8Array.from(atob(L.runs), (ch) => ch.charCodeAt(0));
-    for (let p = 0, k = 0, inside = false; p < b.length; inside = !inside) {
-      let v = 0;
-      for (let sh = 0; ; sh += 7) {
-        const c = b[p++];
-        v += (c & 127) * 2 ** sh;
-        if (c < 128) break;
-      }
-      if (inside) bits.fill(1, k, k + v);
-      k += v;
-    }
-    onLawn = (x, y) => {
-      const i = Math.floor((x - x0) / L.step), j = Math.floor((y - y0) / L.step);
-      return i >= 0 && j >= 0 && i < L.gx && j < L.gy && bits[j * L.gx + i] === 1;
-    };
-  }
+  // on the lawn itself (the build's 25 cm mask), never on its kerb or the paving, nor in a flower bed
+  const lawn = lawnTest(map);
+  const inBed = bedTest(beds, 0.25);
+  const onLawn = (x, y) => lawn(x, y) && !inBed(x, y);
   const MAX = Math.ceil(Math.PI * R * R * PER_CELL * 0.8);
   const mat = new THREE.MeshStandardMaterial({ vertexColors: true, roughness: 0.9, side: THREE.DoubleSide, envMapIntensity: 0.6 });
   mat.onBeforeCompile = (sh) => {
@@ -121,7 +108,7 @@ export function addGrass(scene, map, wind) {
           for (let k = 0; k < PER_CELL && n < MAX; k++) {
             if (hash(i, j, k + 11) > keep) continue;
             const gx = x0 + i + hash(i, j, k), gy = y0 + j + hash(j, i, k + 3);
-            if (!onLawn(gx, gy)) continue;   // on the lawn itself, never on its kerb or the paving
+            if (!onLawn(gx, gy)) continue;
             const sc = 0.85 + hash(i, k, j) * 0.4;
             q.setFromAxisAngle(up, hash(k, i, j) * Math.PI * 2);
             im.setMatrixAt(n++, m4.compose(p.set(gx, level - 0.005, -gy), q, s.set(sc, sc * (0.85 + hash(j, k, i) * 0.4), sc)));

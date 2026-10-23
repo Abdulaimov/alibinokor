@@ -94,8 +94,9 @@ function noiseCanvas(size, base, spots) {
 const BRICK = {
   // the renders' facing brick: caramel to warm brown, a few light and a few dark bricks (sRGB; the
   // earlier sandy set, 232/190/135 on average, read pale yellow on the site), light grey joints
-  tan: { mortar: [204, 198, 188], shades: [[204, 158, 117, 24], [190, 142, 104, 22], [214, 172, 132, 16], [174, 126, 93, 14], [152, 108, 80, 8], [224, 188, 148, 12], [196, 150, 118, 4]] },
-  dark: { mortar: [112, 112, 114], shades: [[77, 77, 80, 30], [90, 90, 93, 28], [67, 67, 70, 22], [104, 104, 108, 12], [58, 58, 61, 8]] },
+  // (23.10.2026: warmer and fuller, the golden caramel of render 1; the graphite a little blue, as there)
+  tan: { mortar: [206, 199, 187], shades: [[214, 156, 96, 24], [200, 140, 84, 22], [224, 172, 112, 16], [184, 124, 74, 14], [160, 104, 62, 8], [232, 188, 134, 12], [206, 148, 94, 4]] },
+  dark: { mortar: [118, 119, 124], shades: [[72, 74, 82, 30], [86, 88, 97, 28], [62, 64, 72, 22], [100, 102, 112, 12], [54, 56, 64, 8]] },
 };
 const brickCache = new Map();
 export function brickTextures(kind) {

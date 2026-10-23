@@ -85,7 +85,6 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = 
     sunI: sun.intensity,
     sunC: sun.color.clone(),
     env: scene.environmentIntensity,
-    bg: scene.backgroundIntensity,
     fog: null,
     fogD: scene.fog.density,
     glass: new Map(), // glass material -> its own reflection strength
@@ -342,7 +341,7 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = 
 
     state.env = base.env * (1 - 0.95 * n) * (1 - 0.4 * g);
     if (!indoors) scene.environmentIntensity = state.env;
-    scene.backgroundIntensity = base.bg * (1 - 0.85 * n) * (1 - 0.45 * g);
+    if (world.skyLight) world.skyLight.value = (1 - 0.85 * n) * (1 - 0.45 * g); // the day's sky (world.js)
     moonSky.intensity = dayFill * (1 - n) + 0.42 * n;
     for (const [m, v] of base.glass) m.envMapIntensity = v * (1 - 0.9 * n) * (1 - 0.3 * g);
     for (const [m, v] of base.glow) m.emissiveIntensity = mix(v, Math.max(v, 1) * 5, L);
