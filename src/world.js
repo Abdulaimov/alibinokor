@@ -123,14 +123,19 @@ function city(scene) {
 }
 
 // ---------- the sky ----------
-// A clear deep blue, paler towards the horizon, with scattered fair-weather cumulus (as on the
-// competitor's site the client liked, 23.10.2026). Drawn per pixel on a sphere round the camera, so
-// the clouds stay crisp at any zoom: the view ray meets a cloud layer; the clouds are where a few
-// octaves of noise on that layer pass a threshold, lit on the sun's side, blue-grey underneath.
-// Below the horizon the ground's dark green-grey (only reflections see it). Colours sRGB, by elevation.
-const SKY_STOPS = [[-90, [38, 46, 34]], [-1, [70, 80, 64]], [0, [186, 214, 244]], [2, [158, 200, 243]], [5, [110, 172, 235]],
+// A clear deep blue, paler towards the horizon (as on the competitor's site the client liked,
+// 23.10.2026), and over it the photographed cumulus of the HDRI, cut out of its own paler sky
+// (tools/ab/clouds.py: public/env/clouds_*.webp; drawn clouds read as smears next to real ones).
+// Drawn per pixel on a sphere round the camera. Below the horizon the haze's colour for a degree
+// and a half (the plain's far edge meets it without a line), then the ground's dark green-grey
+// (only reflections see it). Colours sRGB, by elevation.
+const SKY_STOPS = [[-90, [38, 46, 34]], [-6, [70, 80, 64]], [-1.5, [186, 214, 244]], [0, [186, 214, 244]], [2, [158, 200, 243]], [5, [110, 172, 235]],
   [10, [62, 142, 228]], [15, [32, 122, 216]], [30, [16, 102, 206]], [90, [10, 86, 194]]];
+const HORIZON = 3; // the stop at the horizon
 const lin = (c) => ((c / 255 + 0.055) / 1.055) ** 2.4;
+// the cloud layer, shared by the sky and the sky the glass reflects (loaded in buildWorld)
+// (tint: the light on them, warm and dimmer at dusk, src/night.js)
+const CLOUDS = { map: { value: null }, on: { value: 0 }, rot: { value: new THREE.Matrix3() }, tint: { value: new THREE.Color(1, 1, 1) } };
 // light: the sky's brightness, 0..1 (src/night.js dims it at dusk; the night's dome covers it)
 function makeSky(sunDir, light = { value: 1 }) {
   const el = SKY_STOPS.map((s) => s[0]);
@@ -145,7 +150,10 @@ function makeSky(sunDir, light = { value: 1 }) {
       uEl: { value: el },
       uCol: { value: col },
       uSun: { value: sunDir.clone().normalize() },
-      uCover: { value: +(LIGHT.get('clouds') ?? 0.68) },
+      uClouds: CLOUDS.map,
+      uCloudsOn: CLOUDS.on,
+      uRot: CLOUDS.rot,
+      uCloudTint: CLOUDS.tint,
       uLight: light,
     },
     vertexShader: /* glsl */ `
@@ -159,29 +167,12 @@ function makeSky(sunDir, light = { value: 1 }) {
       uniform float uEl[${el.length}];
       uniform vec3 uCol[${el.length}];
       uniform vec3 uSun;
-      uniform float uCover;
+      uniform sampler2D uClouds;
+      uniform float uCloudsOn;
+      uniform mat3 uRot;
+      uniform vec3 uCloudTint;
       uniform float uLight;
       varying vec3 vDir;
-      float hash(vec2 p) { return fract(sin(dot(p, vec2(127.1, 311.7))) * 43758.5453); }
-      float noise(vec2 p) {
-        vec2 i = floor(p), f = fract(p);
-        vec2 u = f * f * (3.0 - 2.0 * f);
-        return mix(mix(hash(i), hash(i + vec2(1.0, 0.0)), u.x), mix(hash(i + vec2(0.0, 1.0)), hash(i + vec2(1.0, 1.0)), u.x), u.y);
-      }
-      float fbm(vec2 p) {
-        float v = 0.0, a = 0.5;
-        mat2 r = mat2(0.8, -0.6, 0.6, 0.8);
-        for (int i = 0; i < 6; i++) { v += a * noise(p); p = r * p * 2.07 + 13.7; a *= 0.5; }
-        return v;
-      }
-      float cumulus(vec2 q) {
-        float c = fbm(q * 0.45);
-        float b = 0.0, a = 0.5;
-        vec2 r = q * 1.6;
-        mat2 m = mat2(0.8, -0.6, 0.6, 0.8);
-        for (int i = 0; i < 5; i++) { b += a * (1.0 - abs(2.0 * noise(r) - 1.0)); r = m * r * 2.13 + 7.3; a *= 0.5; }
-        return c * 0.7 + b * 0.38;
-      }
       vec3 gradient(float e) {
         vec3 c = uCol[0];
         for (int i = 1; i < ${el.length}; i++) {
@@ -197,21 +188,13 @@ function makeSky(sunDir, light = { value: 1 }) {
         // a soft glow round the sun (the disc itself is the directional light's, not drawn)
         float s = max(dot(d, normalize(uSun)), 0.0);
         col += vec3(1.0, 0.96, 0.88) * (0.25 * pow(s, 24.0) + 0.06 * pow(s, 4.0)) * step(0.0, d.y);
-        if (d.y > 0.004) {
-          // fair-weather cumulus: clusters from a low-frequency field, puffy cells from ridged noise,
-          // the side towards the sun bright, the bottoms and the far side a soft blue-grey
-          vec2 p = d.xz / (d.y + 0.1) * 1.4;
-          vec2 q = p * 1.05 + vec2(3.7, 1.9);
-          float d0 = cumulus(q);
-          float dens = smoothstep(uCover, uCover + 0.07, d0);
-          vec2 toSun = normalize(uSun.xz + 1e-4) * 0.09;
-          float dl = cumulus(q + toSun);
-          float lit = clamp(0.62 + (d0 - dl) * 5.0, 0.0, 1.0);
-          float core = smoothstep(uCover + 0.04, uCover + 0.32, d0);
-          vec3 cloud = mix(vec3(0.58, 0.64, 0.74), vec3(1.0), lit);
-          cloud = mix(cloud, cloud * vec3(0.9, 0.92, 0.96), core * (1.0 - lit) * 0.6);
-          float fade = smoothstep(0.04, 0.2, d.y);
-          col = mix(col, cloud, dens * fade);
+        if (uCloudsOn > 0.5 && d.y > 0.0) {
+          // the photographed clouds: the HDRI's panorama turned as the scene's light is (uRot), its
+          // upper half (v = elevation / 90); light stored as sqrt(c / 3), cover in alpha
+          vec3 q = uRot * d;
+          vec2 uv = vec2(atan(q.z, q.x) * 0.15915494 + 0.5, asin(clamp(q.y, 0.0, 1.0)) * 0.63661977);
+          vec4 cl = texture2D(uClouds, uv);
+          col = mix(col, cl.rgb * cl.rgb * 3.0 * uCloudTint, cl.a);
         }
         gl_FragColor = vec4(col * uLight, 1.0);
         #include <tonemapping_fragment>
@@ -241,11 +224,13 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
   const sunDir = new THREE.Vector3(...skyInfo.sun_dir).normalize().applyAxisAngle(new THREE.Vector3(0, 1, 0), SKY_TURN);
   scene.backgroundRotation.set(0, SKY_TURN, 0);
   scene.environmentRotation.set(0, SKY_TURN, 0);
+  // the HDRI's clouds turned with its light: a direction in the scene -> in the panorama
+  CLOUDS.rot.value.setFromMatrix4(new THREE.Matrix4().makeRotationY(-SKY_TURN));
 
   // aerial perspective: the city a kilometre out a little hazy, the complex (100-400 m) clear; the
   // haze the sky's colour at the horizon, so the plain runs into the sky
   scene.fog = new THREE.FogExp2(HAZE.getHex(), +(LIGHT.get('fog') ?? 0.0007));
-  scene.fog.color.setRGB(...SKY_STOPS[2][1].map(lin)).multiplyScalar(0.97);
+  scene.fog.color.setRGB(...SKY_STOPS[HORIZON][1].map(lin)).multiplyScalar(0.97);
   const skyLight = { value: 1 };
   scene.add(makeSky(sunDir, skyLight));
   scene.background = null;
@@ -314,9 +299,21 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
     e.needsUpdate = true;
     return e;
   };
+  // the clouds: 4k on computers, 2k on phones, ?clouds=8k for the TV film, ?clouds=none for a clear sky
+  const cloudsRes = LIGHT.get('clouds') ?? (Q.level === 'high' ? '4k' : '2k');
+  const clouds = cloudsRes === 'none'
+    ? Promise.resolve()
+    : new THREE.TextureLoader().loadAsync(`${ENV}clouds_${cloudsRes}.webp`).then((t) => {
+      t.colorSpace = THREE.NoColorSpace;
+      t.wrapS = THREE.RepeatWrapping;
+      t.generateMipmaps = false; // (a seam where the panorama's ends meet otherwise)
+      t.minFilter = THREE.LinearFilter;
+      CLOUDS.map.value = t;
+      CLOUDS.on.value = 1;
+    }).catch((e) => console.warn('clouds', e));
   const ready = after
-    .then(() => sky('1k'))
-    .then((t) => {
+    .then(() => Promise.all([sky('1k'), clouds]))
+    .then(([t]) => {
       const e = neutral(t);
       scene.environment = pmrem.fromEquirectangular(e).texture;
       e.dispose();
@@ -363,5 +360,5 @@ export function buildWorld(scene, renderer, after = Promise.resolve()) {
     addTrees(scene, TREES.protos, TREES.list, [...TREES.placed, ...around], toScene);
     addCars(scene, CARS, toScene);
   });
-  return { sun, fill, cityMat, cityLights, skyLight, ready: Promise.all([ready, props]) };
+  return { sun, fill, cityMat, cityLights, skyLight, cloudTint: CLOUDS.tint.value, ready: Promise.all([ready, props]) };
 }

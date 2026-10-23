@@ -254,6 +254,7 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = 
   let hours = DAY, indoors = false;
   const state = { hours, night: 0, lights: 0, dir: base.dir.clone(), env: base.env };
   const sunWarm = new THREE.Color(0xffa565), moonC = new THREE.Color(0xb4c4ff);
+  const cloudDusk = new THREE.Color(1.0, 0.56, 0.42); // (linear)
   const duskFog = new THREE.Color(0xd9a588), blueFog = new THREE.Color(0x3a3a52), nightFog = new THREE.Color(0x0b0f19);
 
   // ---------- the facade lighting (blender/ab/night.py): uplights and LED lines ----------
@@ -342,6 +343,8 @@ export function timeOfDay({ scene, camera, renderer, world, lamps = [], shops = 
     state.env = base.env * (1 - 0.95 * n) * (1 - 0.4 * g);
     if (!indoors) scene.environmentIntensity = state.env;
     if (world.skyLight) world.skyLight.value = (1 - 0.85 * n) * (1 - 0.45 * g); // the day's sky (world.js)
+    // its clouds lit by the low sun: pink and orange, then grey and dark as the light goes
+    world.cloudTint?.setRGB(1, 1, 1).lerp(cloudDusk, g).multiplyScalar((1 - 0.9 * n) * (1 - 0.3 * g));
     moonSky.intensity = dayFill * (1 - n) + 0.42 * n;
     for (const [m, v] of base.glass) m.envMapIntensity = v * (1 - 0.9 * n) * (1 - 0.3 * g);
     for (const [m, v] of base.glow) m.emissiveIntensity = mix(v, Math.max(v, 1) * 5, L);

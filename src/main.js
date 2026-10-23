@@ -189,7 +189,7 @@ Promise.all([modelLoad, world.ready])
   .catch((e) => console.warn('time of day', e));
 dtRange.addEventListener('input', () => setHours(+dtRange.value));
 
-let grass = null, flowers = null;
+let grass = null, flowers = null, hqDone = false;
 // High quality (computers): the ground's baked sky occlusion and glass that reflects its surroundings
 // (taken once, in daylight, when everything is in; the floor or flat open meanwhile is put back)
 async function highQuality() {
@@ -224,6 +224,7 @@ async function highQuality() {
   if (state.mode === 'floor' && state.tower) building.showUpTo(state.tower, state.floor);
   else if (state.mode === 'walk' && walkInterior && !walkInterior.outdoor) building.showAll(state.tower, state.floor);
   shadowsDirty();
+  hqDone = true;
 }
 // let go of the slider: the arrow keys walk again (a focused slider would take them)
 dtRange.addEventListener('pointerup', () => dtRange.blur());
@@ -1307,6 +1308,8 @@ window.__app = {
   selectBlock, selectFloor, selectApt, enterWalk, exitWalk, goOverview, enterSiteWalk,
   get daytime() { return daytime; },
   get flowers() { return flowers; },
+  get grass() { return grass; },
+  get hqDone() { return hqDone; },
   film: { WIND, driveCars, setDrivers, updateCars, shadowsDirty: () => shadowsDirty() },
   setHours: (h) => setHours(h),
   setClean: (on) => setClean(on),
