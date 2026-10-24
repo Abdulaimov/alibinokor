@@ -437,6 +437,26 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     s0 -= 0.005;
     s1 += 0.005;
     const mx = mx0, my = my0, sm = (s0 + s1) / 2;
+    // the door's pieces (frame, casings, leaf, the wall over it) go where the walls end beside the
+    // opening, in the middle of their thickness: the gap drawn in each room's outline can be a
+    // centimetre or two off them, and differently on the two sides of one wall (23.10.2026: frames
+    // and leaves stood off their walls). The doorway itself (what the outline is checked against)
+    // stays the drawn gap.
+    const r0 = r;
+    {
+      const jamb = (sgn) => {
+        for (let t = 0; t <= r0.len / 2 + 0.04; t += 0.005) {
+          if (solidKind([mx + r0.u[0] * sgn * t + r0.n[0] * sm, my + r0.u[1] * sgn * t + r0.n[1] * sm])) return t;
+        }
+        return null;
+      };
+      const ta = jamb(-1), tb = jamb(1);
+      // (only the small misses of the drawing, up to 3.5 cm: a wider difference is a glazed door
+      // beside a window or a door in a corner, left as drawn)
+      const a = ta !== null && Math.abs(ta - r0.len / 2) < 0.035 ? [mx - r0.u[0] * ta, my - r0.u[1] * ta] : r0.a;
+      const b = tb !== null && Math.abs(tb - r0.len / 2) < 0.035 ? [mx + r0.u[0] * tb, my + r0.u[1] * tb] : r0.b;
+      r = { ...r0, a, b, len: dist(a, b) };
+    }
     const behind = roomsAt.at(mx + r.n[0] * (s0 - 0.15), my + r.n[1] * (s0 - 0.15)) ?? across;
     const entrance = !behind || behind.kind === 'common' || (behind.kind === 'room' && behind.data.apt !== apt);
     // (a flat has one front door: a second way to the corridor is walled up)
@@ -445,7 +465,7 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     if (entrance) entrances.push({ apt, room, common: !behind || behind.kind === 'common', mid: [mx, my], n: r.n, s1 });
     const shift = (p, s) => [p[0] + r.n[0] * s, p[1] + r.n[1] * s];
     const face = { ...r, a: shift(r.a, s1), b: shift(r.b, s1) };
-    doorSpans.push({ a: r.a, b: r.b, u: r.u, n: r.n, len: r.len, apt: apt.id, room: room.kind, across: across.kind === 'room' ? across.data.room.kind : across.kind, entrance, band: [s0, s1],
+    doorSpans.push({ a: r0.a, b: r0.b, u: r0.u, n: r0.n, len: r0.len, apt: apt.id, room: room.kind, across: across.kind === 'room' ? across.data.room.kind : across.kind, entrance, band: [s0, s1],
       rooms: [room, across.kind === 'room' ? across.data.room : null], aptObj: apt });
     // casing on this side of the wall
     casing(k, entrance ? M.entrance : glazed ? M.frame : M.skirting, face);
@@ -454,8 +474,12 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     const seen = (list) => list.some((c) => dist(c, centre) < 0.45);
     if (!seen(doors)) {
       doors.push(centre);
-      // (2 cm into the walls on either side: no hairline at its ends)
-      slab(k, M.wall, shift(r.a, s0), shift(r.b, s0), r.n, 0, s1 - s0, DOOR_H, H, 0.02);
+      // (4 cm into the walls on either side: no hairline at its ends)
+      slab(k, M.wall, shift(r.a, s0), shift(r.b, s0), r.n, 0, s1 - s0, DOOR_H, H, 0.04);
+      // the door frame through the wall (23.10.2026: a slit showed beside the leaf and where the
+      // drawn gap stops short of the wall's end): its sides 1.5 cm into the opening and 3 cm on into
+      // the wall's end, its head under the wall over the door
+      lining(k, entrance ? M.entrance : glazed ? M.frame : M.skirting, r, s0, s1);
     }
     if (seen(leaves)) return [s0, s1];
     if (entrance) {
@@ -1039,7 +1063,7 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     doors: doors.length,
     liftTags, // { x, y, z (scene), q: [kg, ...] }: one per lift hall, for the floor view's tags
     reach, // walk-through: rooms reachable before furniture and from the start after it (for the checks)
-    doorways: doorSpans.map((d) => ({ apt: d.apt, room: d.room, across: d.across, entrance: d.entrance, len: +d.len.toFixed(2), a: d.a.map((v) => +v.toFixed(2)), band: d.band.map((v) => +v.toFixed(2)) })),
+    doorways: doorSpans.map((d) => ({ apt: d.apt, room: d.room, across: d.across, entrance: d.entrance, len: +d.len.toFixed(2), a: d.a.map((v) => +v.toFixed(3)), b: d.b.map((v) => +v.toFixed(3)), n: d.n.map((v) => +v.toFixed(3)), band: d.band.map((v) => +v.toFixed(3)) })),
     entrances: entrances.map((e) => ({ apt: e.apt.id, room: e.room.kind, common: e.common, mid: e.mid.map((v) => +v.toFixed(2)) })),
     gaps: gaps.map((g) => ({ apt: g.apt.id, room: `${g.room.kind} ${g.room.area}`, other: g.other ? `${g.other.kind} ${g.other.area}` : null, across: g.across, done: g.done, len: +g.r.len.toFixed(2), depth: g.depth && +g.depth.toFixed(2), a: g.r.a.map((v) => +v.toFixed(2)), b: g.r.b.map((v) => +v.toFixed(2)) })),
     // Move from (x, z) to (nx, nz) in the scene without walking through walls or out of the flat.
@@ -1169,6 +1193,17 @@ function casing(k, mat, r) {
   slab(k, mat, ext(r.a, -w), r.a, r.n, 0, t, 0, DOOR_H + w);
   slab(k, mat, r.b, ext(r.b, w), r.n, 0, t, 0, DOOR_H + w);
   slab(k, mat, ext(r.a, -w), ext(r.b, w), r.n, 0, t, DOOR_H, DOOR_H + w);
+}
+
+/** the frame lining a doorway's opening r through its wall (from s0 to s1 along r.n): both sides
+ * and the head; the sides run 3 cm on past the opening's ends into the walls (where the drawing's
+ * gap and the wall's end differ by a centimetre or two, no slit between them shows) */
+function lining(k, mat, r, s0, s1) {
+  const shift = (p, s) => [p[0] + r.n[0] * s, p[1] + r.n[1] * s];
+  const t = 0.015, e = 0.03;
+  slab(k, mat, shift(r.a, s0), shift(r.a, s1), r.u, -e, t + e, 0, DOOR_H);
+  slab(k, mat, shift(r.b, s0), shift(r.b, s1), [-r.u[0], -r.u[1]], -e, t + e, 0, DOOR_H);
+  slab(k, mat, shift(r.a, s0), shift(r.b, s0), r.n, 0, s1 - s0, DOOR_H - t, DOOR_H, e);
 }
 
 /** a door leaf from hinge h to tip (standing in the room), its face towards w */
