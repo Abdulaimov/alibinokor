@@ -32,11 +32,8 @@ for key, pl in plans.items():
     pieces = [g for g in getattr(fill, 'geoms', [fill]) if g.geom_type == 'Polygon' and g.area > 2e-5]
     added = []
     for g in pieces:
-        # (a sliver: thin, not a lump the closing rounded off a corner)
-        mrr = g.minimum_rotated_rectangle
-        xs, ys = mrr.exterior.coords.xy
-        sides = sorted(((xs[i + 1] - xs[i]) ** 2 + (ys[i + 1] - ys[i]) ** 2) ** 0.5 for i in range(4))
-        if sides[0] > 2 * R + 0.002:
+        # (slivers only, of any shape: nothing of it wider than the closing's 4 cm)
+        if not g.buffer(-(R + 0.001)).is_empty:
             continue
         # a little into the pieces on either side: no hairline where it meets them
         g = g.buffer(0.003, join_style=2).intersection(closed.buffer(0.003, join_style=2))

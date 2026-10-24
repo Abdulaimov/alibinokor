@@ -268,7 +268,9 @@ export function buildFloor(towerKey, floor, apts, walk = null) {
     // segment along the window at the middle of the wall
     const P = (t, s) => [ax.cx + ax.u[0] * t + ax.v[0] * s, ax.cy + ax.u[1] * t + ax.v[1] * s];
     const a = P(ax.t0, mid), b = P(ax.t1, mid), len = ax.t1 - ax.t0;
-    windowFrame(k, M, a, b, n, len, SILL, H - HEAD);
+    // (the frame runs 3 cm on into the walls at its ends: where the drawn opening stops short of
+    // the wall, no slit of sky shows beside the frame)
+    windowFrame(k, M, P(ax.t0 - 0.03, mid), P(ax.t1 + 0.03, mid), n, len + 0.06, SILL, H - HEAD);
     // sill board, flush with the inside face and a little proud of it
     const inner = n[0] * ax.v[0] + n[1] * ax.v[1] > 0 ? ax.s1 : ax.s0;
     const ia = P(ax.t0, inner), ib = P(ax.t1, inner);
