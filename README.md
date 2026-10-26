@@ -124,11 +124,27 @@
   перед каждой 1,5 м свободно, не у фонарей и не у оборудования площадок; деревья, посадки и люди
   ставятся в обход скамеек; люди не стоят в зданиях, машинах, на скамейках и в фонарях.
   Проверка: `tools/ab/py tools/ab/check_street.py` (пустой список — всё стоит правильно).
-- **Вывески** — отдельный слой (`src/signs.js`, `public/signs/signs.json`): буквы на тёмном фризе
-  над витринами уличных фасадов, места даёт сборка (`complex.json` → `shops`). Набор `brands`
-  (BOSS, LACOSTE — по желанию заказчика, концепт, не подтверждённые арендаторы) показывается на
-  сайте; `?signs=neutral` — нейтральные вывески. Свои логотипы — PNG с белыми буквами на прозрачном
-  фоне в `public/signs/`, строка в `signs.json`; картинки-заглушки рисует `tools/ab/make_signs.py`.
+- **Вывески** — отдельный слой (`src/signs.js`, `public/signs/signs.json`), модель не пересобирается.
+  Набор `brands` (26.10.2026, по желанию заказчика: популярные бренды с логотипами; это концепт, не
+  подтверждённые арендаторы) — все 103 портала блоков Б, В, Г, Д с улицы и со двора поделены на 39
+  магазинов по 1–3 портала. У каждого магазина вывеска на тёмном фризе над порталами (буквы 0,74 м,
+  днём белый металл или цвет бренда, ночью светятся) и световой постер бренда 2,2 × 3,1 м за стеклом
+  второго этажа (как постеры на рендере 3; на телефонах постеров нет — экономия памяти). На белом
+  поясе подиума башни А — 11 логотипов, как в торговом центре (ZARA, H&M, UNIQLO, STARBUCKS…).
+  Улица — дома моды (Gucci, Louis Vuitton, Prada, Rolex, Dior, BOSS, Chanel, Lacoste, Versace,
+  Burberry, Armani, Calvin Klein, Tommy Hilfiger) и спорт (Nike, Jordan, adidas, Puma); торцы — спорт и
+  техника; двор — повседневные магазины, кафе и LEGO. Всего 50 брендов, каждый один раз.
+  Как менять: бренд и место — `RUNS` и `BAND_BRANDS` в `tools/ab/place_signs.py`; новый бренд — SVG в
+  `tools/ab/brand_logos/` (откуда взяты — `SOURCES.md`) и строка в `BRANDS` `tools/ab/brand_signs.py`:
+  ```
+  npx vite --port 5191                                            # сайт должен работать
+  node tools/ab/shopfronts.mjs build/shopfronts.json              # порталы и пояс А из модели
+  node tools/ab/svg_raster.mjs tools/ab/brand_logos build/brand_png 1600
+  tools/ab/py tools/ab/brand_signs.py                             # картинки + лист build/brand_signs.png
+  tools/ab/py tools/ab/place_signs.py                             # набор brands в signs.json
+  node tools/ab/sign_shots.mjs build/sign_shots                   # виды для проверки, днём и ночью
+  ```
+  `?signs=neutral` — нейтральные вывески (CAFÉ, FASHION…, `tools/ab/make_signs.py`) для роликов Jomi.
 
 ## Высокое качество на компьютере (22.10.2026)
 
